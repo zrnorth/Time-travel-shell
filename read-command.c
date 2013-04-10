@@ -50,9 +50,10 @@ make_command_stream (int (*get_next_byte) (void *),
 
     //This stores the first byte and a pointer to the first byte in dynamic memory.
     //We later return this so it cannot be local
-    char* first_byte = checked_malloc(sizeof(char));
+    char* first_byte = checked_malloc(2 * sizeof(char));
+    char* end_byte = first_byte + sizeof(char); //points to what should be the null byte
     *first_byte = (char)get_next_byte(get_next_byte_argument);
-
+    *end_byte = '\0';
     char** fbptr = checked_malloc(sizeof(char*));
     *fbptr = first_byte;
    
@@ -73,7 +74,10 @@ read_command_stream (command_stream_t s)
 {
   /* FIXME: Replace this with your implementation too.  */
     command_t the_command = &(s->c);
-    printf("VALUE RECEIVED: %c\n",*(*(the_command->u.word)));
+
+    char first_byte = *(*(the_command->u.word));
+
+    printf("VALUE RECEIVED: %c\n", first_byte);
  
     return the_command;
   
