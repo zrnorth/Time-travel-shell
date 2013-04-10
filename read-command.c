@@ -33,7 +33,7 @@ make_command_stream (int (*get_next_byte) (void *),
      add auxiliary functions and otherwise modify the source code.
      You can also use external functions defined in the GNU C Library.  */
 
-    //Right now this just tries to create a simple command made of one byte.
+    //Right now this just tries to create a simple command from all inputs.
     struct command_stream tempstr;
     command_stream_t r;
     r = checked_malloc(sizeof(struct command_stream));
@@ -45,10 +45,29 @@ make_command_stream (int (*get_next_byte) (void *),
     cmd.input = 0;
     cmd.output = 0;
 
-    //pointer to the ptr which pts to the first byte in the word.
-    //Currently just copies the first byte and stores it in the command.
+    //Temp implementation: get all the chars from the input script and output as 1 command.
+    char* b = checked_malloc(sizeof(char));
+    int num_bytes_read = 0;
    
+    int the_byte = get_next_byte(get_next_byte_argument);
+    while (the_byte > 0) //-1 on EOF
+    {
+        num_bytes_read++;
+        b = checked_realloc(b, num_bytes_read+1); //needs to be null terminated
+        *(b + (num_bytes_read-1)*sizeof(char)) = the_byte;
+        the_byte = get_next_byte(get_next_byte_argument); 
+    }
+    *(b + (num_bytes_read)*sizeof(char)) = '\0'; //last value is null-term
 
+    //b holds all the chars input from the shell. Now make a pointer to it and put it
+    //in the command stream.
+    char** fbptr = checked_malloc(sizeof(char*));
+    *fbptr = b;
+    cmd.u.word = fbptr;
+
+    r->c = cmd;
+    return r;
+/*
     //This stores the first byte and a pointer to the first byte in dynamic memory.
     //We later return this so it cannot be local
     char* first_byte = checked_malloc(2 * sizeof(char));
@@ -60,12 +79,11 @@ make_command_stream (int (*get_next_byte) (void *),
    
     
     cmd.u.word = fbptr;
-
     //copy the constructed command to r
     r->c = cmd;
     
     return r;
-
+*/
   //error (1, 0, "command reading not yet implemented");
   //keeping this as a comment because don't remember how to do "error" lol
 }
@@ -81,7 +99,6 @@ read_command_stream (command_stream_t s)
         case SIMPLE_COMMAND: //leaf of the tree
         {
             char first_byte = *(*(the_command->u.word));
-            printf("VALUE RECEIVED: %c\n", first_byte);
 
             //need to return the command and then modify the stream so we don't return it again.
             //malloc a new version and delete the old one.
