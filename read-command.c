@@ -7,6 +7,7 @@
 
 #include <error.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* FIXME: You may need to add #include directives, macro definitions,
    static function definitions, etc.  */
@@ -15,7 +16,7 @@
    complete the incomplete type declaration in command.h.  */
 
 
-// Temp stream; just accumulates a single command
+//Command_stream needs to have a head an
 
 struct command_stream
 {
@@ -75,11 +76,27 @@ read_command_stream (command_stream_t s)
   /* FIXME: Replace this with your implementation too.  */
     command_t the_command = &(s->c);
 
-    char first_byte = *(*(the_command->u.word));
+    switch (the_command->type)
+    {
+        case SIMPLE_COMMAND: //leaf of the tree
+        {
+            char first_byte = *(*(the_command->u.word));
+            printf("VALUE RECEIVED: %c\n", first_byte);
 
-    printf("VALUE RECEIVED: %c\n", first_byte);
- 
-    return the_command;
-  
+            //need to return the command and then modify the stream so we don't return it again.
+            //malloc a new version and delete the old one.
+
+            command_t cmd = checked_malloc(sizeof(struct command));
+            *cmd = *the_command; //copy it over
+            free(the_command); //delete
+            return cmd;
+        }
+        default:
+        {
+            //This gets called if the stream is empty (reached the end)
+            return 0;
+        }
+    }
+    return 0; //should never reach here (default should catch all)
   //Since we currently can just deal with one command, we pull the command and print it.
 }
