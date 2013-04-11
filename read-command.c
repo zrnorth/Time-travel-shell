@@ -256,14 +256,37 @@ make_command_stream (int (*get_next_byte) (void *),
         
           //special characters
           case ';':
+          case '|':
+          case '&':
           {
+            //need to get which command type first
+            enum command_type t;
+            if (byte == '|') //need to check if it is a pipe or an OR
+            {
+                char next = (char)get_next_byte(get_next_byte_argument);
+                if (next == '|') //OR
+                    t = OR_COMMAND;
+                else
+                    t = PIPE_COMMAND;
+            }
+            else if (byte == '&') //check for syntax error here
+            {
+                char next = (char)get_next_byte(get_next_byte_argument);
+                if (next != '&')
+                    error(1, 0, "syntax error in input");
+                else
+                    t = AND_COMMAND;
+            }
+            else //byte == ';'
+                t = SEQUENCE_COMMAND;
+
             if (!current_command) //if NULL, just continue
               break;
             else if (current_command->type == SIMPLE_COMMAND)
             {
               //grow upwards; the current command becomes the leftside
               command_t cmd = checked_malloc(sizeof(struct command));
-              cmd->type = SEQUENCE_COMMAND;
+              cmd->type = t;
               cmd->status = 0;
               cmd->input = 0;
               cmd->u.command[0] = top_command; //leftside points to the current
@@ -275,7 +298,7 @@ make_command_stream (int (*get_next_byte) (void *),
             else if (current_command->type == SUBSHELL_COMMAND)
             {
               command_t cmd = checked_malloc(sizeof(struct command));
-              cmd->type = SEQUENCE_COMMAND;
+              cmd->type = t;
               cmd->status = 0;
               cmd->input = 0;
               cmd->u.command[0] = subshell_parent; //leftside points to the current
