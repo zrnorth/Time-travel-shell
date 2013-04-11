@@ -340,8 +340,25 @@ read_command_stream (command_stream_t s)
                 return read_command_stream(n);
             }
         }
-        case SEQUENCE_COMMAND: //need to do both sides of the sequence, left first
+        case SEQUENCE_COMMAND:
+        case AND_COMMAND:
+        case OR_COMMAND:
+        case PIPE_COMMAND:
         {
+            if (the_command->status == 0)
+            {
+                the_command->status = 1;
+                return the_command->u.command[0];
+            }
+            else if (the_command->status == 1)
+            {
+                the_command->status = 2;
+                return the_command->u.command[1];
+            }
+            else
+                return NULL;
+
+            /*
             command_t leftside = the_command->u.command[0];
             command_t rightside = the_command->u.command[1];
             if (leftside && leftside->status != 2 && the_command->status==0)
@@ -377,6 +394,7 @@ read_command_stream (command_stream_t s)
             }
             the_command->status = 2; //no longer want to check this nod
             return NULL; //default
+            */
         }
 
 
