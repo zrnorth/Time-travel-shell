@@ -159,9 +159,6 @@ make_command_stream (int (*get_next_byte) (void *),
           {
             if (!current_command) //if there is no current command, first letter
             {
-              //DEBUG
-              printf("NO CURRENT COMMAND, CREATING ONE.\n");
-
               command_t cmd = checked_malloc(sizeof(struct command));
               cmd->type = SIMPLE_COMMAND;
               cmd->status = 0;
@@ -187,9 +184,6 @@ make_command_stream (int (*get_next_byte) (void *),
             {
               if (current_command->type == SIMPLE_COMMAND)
               {
-                //DEBUG
-                printf("CURRENT COMMAND, APPENDING.\n");
-                printf("%c\n", byte);
                 char* str = *(current_command->u.word);
                 int len = strlen(str);
                 str = checked_realloc(str, len+1); //increase size by 1 and add new byte
@@ -202,7 +196,6 @@ make_command_stream (int (*get_next_byte) (void *),
                 *fbptr = str;
                 current_command->u.word = fbptr;
 
-                printf("The third value is: %x\n", *(*fbptr+2));
                 break;
               }
               else if (current_command->type == SUBSHELL_COMMAND)
@@ -250,7 +243,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 char** fbptr = checked_malloc(sizeof(char*));
                 *fbptr = str;
                 cmd->u.word = fbptr;
-
+                
                 current_command->u.command[1] = cmd; //rightside pts to new branch
                 current_command = cmd;
                 //top stays the same.
@@ -260,13 +253,45 @@ make_command_stream (int (*get_next_byte) (void *),
               }
             }
           }
-        }
+        
+          //special characters
+          case ';':
+          {
+            if (!current_command) //if NULL, just continue
+              break;
+            else if (current_command->type == SIMPLE_COMMAND)
+            {
+              //grow upwards; the current command becomes the leftside
+              command_t cmd = checked_malloc(sizeof(struct command));
+              cmd->type = SEQUENCE_COMMAND;
+              cmd->status = 0;
+              cmd->input = 0;
+              cmd->u.command[0] = top_command; //leftside points to the current
+            
+              current_command = cmd;
+              top_command = cmd; //new "top" bc growing upwards
+              break;
+            }
+            else if (current_command->type == SUBSHELL_COMMAND)
+            {
+              command_t cmd = checked_malloc(sizeof(struct command));
+              cmd->type = SEQUENCE_COMMAND;
+              cmd->status = 0;
+              cmd->input = 0;
+              cmd->u.command[0] = subshell_parent; //leftside points to the current
+              
+              current_command = cmd;
+              //modify the subshell parent to point to this new command
+              subshell_parent->u.subshell_command = current_command;
+            }
+            else //just continue otherwise
+              break;
+          }
+        } //END SWITCH
         //goto next byte in the loop
         byte = get_next_byte(get_next_byte_argument);
     }
     
-    //DEBUG
-    printf("EXITING.\n");
     struct command_stream temp;
     command_stream_t r;
     r = checked_malloc(sizeof(struct command_stream));
@@ -291,18 +316,74 @@ read_command_stream (command_stream_t s)
         {
             //need to return the command and then modify the stream so we don't return it again.
             //malloc a new version and delete the old one.
-
-            command_t cmd = checked_malloc(sizeof(struct command));
-            *cmd = *the_command; //copy it over
-            free(the_command); //delete
-            return cmd;
+            if (the_command->status == 0) //first time being visited
+            {
+                the_command->status = 2; //2 means don't check this anymore
+                command_t cmd = checked_malloc(sizeof(struct command));
+                *cmd = *the_command; //copy it over
+                return cmd;
+            }
+            else
+                return NULL;
         }
-        //In the other cases need to use recursion to go down the tree, and the
-        //command "status" variable to remember which direction to go
+        case SUBSHELL_COMMAND: //we are in a subshell, so need to execute the subcommands
+        {
+            command_t subcmd = the_command->u.subshell_command;
+            if (!subcmd || subcmd->status !=0) 
+                return NULL;
+            else
+            {
+                struct command_stream new;
+                new.c = *subcmd;
+                command_stream_t n = &new;
+                the_command->status = 2;
+                return read_command_stream(n);
+            }
+        }
+        case SEQUENCE_COMMAND: //need to do both sides of the sequence, left first
+        {
+            command_t leftside = the_command->u.command[0];
+            command_t rightside = the_command->u.command[1];
+            if (leftside && leftside->status != 2 && the_command->status==0)
+            //indicates not already visited
+            { 
+                struct command_stream new;
+                new.c = *leftside;
+                command_stream_t n = &new;
+                command_t ls_returned = read_command_stream(n);
+                if (ls_returned)
+                {
+                    //update to point to the modified values
+                    *the_command->u.command[0] = n->c;
+                    return ls_returned;
+                }
+                    
+            }
+
+            the_command->status = 1; //no longer want to check that side
+            if (rightside && rightside->status != 2)
+            { //right
+                 
+                struct command_stream new;
+                new.c = *rightside;
+                command_stream_t n = &new;
+                command_t rs_returned = read_command_stream(n);
+                //update the "real" copy with the "working" copy
+                if (rs_returned)
+                {
+                    *the_command->u.command[1] = n->c;
+                    return rs_returned;
+                }
+            }
+            the_command->status = 2; //no longer want to check this nod
+            return NULL; //default
+        }
+
+
         default:
         {
             //This gets called if the stream is empty (reached the end)
-            return 0;
+            return NULL;
         }
     }
     return 0; //should never reach here (default should catch all)
