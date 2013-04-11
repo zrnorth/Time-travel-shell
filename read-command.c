@@ -319,9 +319,7 @@ read_command_stream (command_stream_t s)
             if (the_command->status == 0) //first time being visited
             {
                 the_command->status = 2; //2 means don't check this anymore
-                command_t cmd = checked_malloc(sizeof(struct command));
-                *cmd = *the_command; //copy it over
-                return cmd;
+                return the_command; 
             }
             else
                 return NULL;
@@ -348,12 +346,7 @@ read_command_stream (command_stream_t s)
             if (the_command->status == 0)
             {
                 the_command->status = 1;
-                return the_command->u.command[0];
-            }
-            else if (the_command->status == 1)
-            {
-                the_command->status = 2;
-                return the_command->u.command[1];
+                return the_command;
             }
             else
                 return NULL;
