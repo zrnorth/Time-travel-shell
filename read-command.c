@@ -253,7 +253,6 @@ make_command_stream (int (*get_next_byte) (void *),
               }
             }
           }
-        
           //special characters
           case ';':
           case '|':
@@ -277,8 +276,10 @@ make_command_stream (int (*get_next_byte) (void *),
                 else
                     t = AND_COMMAND;
             }
-            else //byte == ';'
+            else //byte == ; or \n
+            {
                 t = SEQUENCE_COMMAND;
+            }
 
             if (!current_command) //if NULL, just continue
               break;
@@ -312,9 +313,15 @@ make_command_stream (int (*get_next_byte) (void *),
           }
         } //END SWITCH
         //goto next byte in the loop
-        byte = get_next_byte(get_next_byte_argument);
-    }
+        int next_byte = get_next_byte(get_next_byte_argument);
+        printf("new byte: %c\n", byte);
+        if ((char)byte == '\n' && next_byte < 0)
+            break;
+        else
+            byte = next_byte;
     
+    }
+    printf("exited with value: %c\n", byte); 
     struct command_stream temp;
     command_stream_t r;
     r = checked_malloc(sizeof(struct command_stream));
