@@ -159,15 +159,12 @@ make_command_stream (int (*get_next_byte) (void *),
           case '_':
           case ' ':
           case '\t':
-          //not really necessary to change for pure output
-          case '<':
-          case '>':
           {
             if (!current_command) //if there is no current command, first letter
             {
               command_t cmd = checked_malloc(sizeof(struct command));
               cmd->type = SIMPLE_COMMAND;
-              cmd->status = 0;
+              cmd->status = -1;
               cmd->input = 0;
               cmd->output = 0;
               //need to make a new string for this command to point to
@@ -188,7 +185,7 @@ make_command_stream (int (*get_next_byte) (void *),
             }
             else //there is a current command
             {
-              if (current_command->type == SIMPLE_COMMAND)
+              if (current_command->type == SIMPLE_COMMAND && current_command->status == -1)
               {
                 char* str = *(current_command->u.word);
                 int len = strlen(str);
@@ -209,7 +206,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 //inside a subshell, need to point it to a new simple command
                 command_t cmd = checked_malloc(sizeof(struct command));
                 cmd->type = SIMPLE_COMMAND;
-                cmd->status = 0;
+                cmd->status = -1;
                 cmd->input = 0;
                 cmd->output = 0;
                 //need to make a new string for this command to point to
@@ -238,7 +235,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 //need to make the "rightside" for this tree
                 command_t cmd = checked_malloc(sizeof(struct command));
                 cmd->type = SIMPLE_COMMAND;
-                cmd->status = 0;
+                cmd->status = -1;
                 cmd->input = 0;
                 cmd->output = 0;
                 //need to make a new string for this command to point to
@@ -261,7 +258,6 @@ make_command_stream (int (*get_next_byte) (void *),
             }
           }
 
-          /*
           //redirs
           case '<':
           case '>':
@@ -270,8 +266,9 @@ make_command_stream (int (*get_next_byte) (void *),
               error(1, 0, "syntax error: can't start with an IO redirect");
             if (current_command->type != SIMPLE_COMMAND) //has to be inside a simple command
               error(1, 0, "syntax error: IO redirect");
-            if (c == '<' && !current_command->input) //valid input
+            if (c == '<' && !current_command->input && !current_command->output) //valid input
             {
+                shouldGetAnotherByte = false;
                 char* str = checked_malloc(sizeof(char));
                 *str = '\0';
                 int len = 0;
@@ -279,7 +276,8 @@ make_command_stream (int (*get_next_byte) (void *),
                 {
                   c = (char)get_next_byte(get_next_byte_argument);
                   if ((int)c < 0) break; //eof
-                  if (next == '>' || next == ' ' || next == '\t') break; //switch to output
+                  if (c == '>' || c == '\n') break; //switch to output
+                  if (c == ' ' || c == '\t') continue; // ignore whitespace
                   //lengthen string
                   len++;
                   str = checked_realloc(str, len+1); //increase size by 1
@@ -288,11 +286,29 @@ make_command_stream (int (*get_next_byte) (void *),
                 }
                 current_command->input = str; //set the input to this string
             }
-          } */
-                  
-                    
-
-                
+            if (c == '>' && !current_command->output) //valid output
+            {
+                shouldGetAnotherByte = false;
+                char* str = checked_malloc(sizeof(char));
+                *str = '\0';
+                int len = 0;
+                while (true)
+                {
+                  c = (char)get_next_byte(get_next_byte_argument);
+                  if ((int)c < 0) break; //eof
+                  if (c == '>' || c == '\n') break; //switch to output
+                  if (c == ' ' || c == '\t') continue;
+                  //lengthen string
+                  len++;
+                  str = checked_realloc(str, len+1); //increase size by 1
+                  *(str + (len-1)*sizeof(char)) = c;
+                  *(str + (len)*sizeof(char)) = '\0';
+                }
+                current_command->output = str;
+             }
+            current_command->status = 0; //no more input possible for this command   
+            break;
+          } 
               
                 
           //special characters
@@ -370,6 +386,13 @@ make_command_stream (int (*get_next_byte) (void *),
           else
             byte = next_byte;
         }
+        else
+        {
+            printf("%c\n", c);
+            if ((int)c < 0)
+                break;
+        }
+
         
     }
     printf("exited with value: %c\n", byte); 
