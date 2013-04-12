@@ -76,11 +76,10 @@ make_command_stream (int (*get_next_byte) (void *),
     command_t top_command = NULL;
     command_t subshell_parent = NULL;
     
-    int byte = get_next_byte(get_next_byte_argument);
-    while (byte > 0)
+    char c = (char)get_next_byte(get_next_byte_argument);
+    while ((int)c > 0)
     {
         bool shouldGetAnotherByte = true;
-        char c = (char)byte;
         switch(c)
         {
           //normal chars
@@ -160,11 +159,12 @@ make_command_stream (int (*get_next_byte) (void *),
           case ' ':
           case '\t':
           {
+            printf("found a char\n");
             if (!current_command) //if there is no current command, first letter
             {
               command_t cmd = checked_malloc(sizeof(struct command));
               cmd->type = SIMPLE_COMMAND;
-              cmd->status = -1;
+              cmd->status = -1; //indicates not done yet
               cmd->input = 0;
               cmd->output = 0;
               //need to make a new string for this command to point to
@@ -276,7 +276,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 {
                   c = (char)get_next_byte(get_next_byte_argument);
                   if ((int)c < 0) break; //eof
-                  if (c == '>' || c == '\n') break; //switch to output
+                  if (c == '>' || c == '|' || c == '&' || c == '\n') break; //switch to output
                   if (c == ' ' || c == '\t') continue; // ignore whitespace
                   //lengthen string
                   len++;
@@ -284,6 +284,7 @@ make_command_stream (int (*get_next_byte) (void *),
                   *(str + (len-1)*sizeof(char)) = c;
                   *(str + (len)*sizeof(char)) = '\0';
                 }
+                printf("%c\n", *str);
                 current_command->input = str; //set the input to this string
             }
             if (c == '>' && !current_command->output) //valid output
@@ -296,7 +297,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 {
                   c = (char)get_next_byte(get_next_byte_argument);
                   if ((int)c < 0) break; //eof
-                  if (c == '>' || c == '\n') break; //switch to output
+                  if (c == '>' || c == '|' || c == '&' || c == '\n') break; //switch to output
                   if (c == ' ' || c == '\t') continue;
                   //lengthen string
                   len++;
@@ -304,6 +305,7 @@ make_command_stream (int (*get_next_byte) (void *),
                   *(str + (len-1)*sizeof(char)) = c;
                   *(str + (len)*sizeof(char)) = '\0';
                 }
+                printf("%c\n", *str);
                 current_command->output = str;
              }
             current_command->status = 0; //no more input possible for this command   
@@ -315,10 +317,11 @@ make_command_stream (int (*get_next_byte) (void *),
           case ';':
           case '|':
           case '&':
+          case '\n':
           {
             //need to get which command type first
             enum command_type t;
-            if (byte == '|') //need to check if it is a pipe or an OR
+            if (c == '|') //need to check if it is a pipe or an OR
             {
                 char next = (char)get_next_byte(get_next_byte_argument);
                 if (next == '|') //OR
@@ -326,11 +329,11 @@ make_command_stream (int (*get_next_byte) (void *),
                 else
                 {
                     shouldGetAnotherByte = false;
-                    byte = next;
+                    c = next;
                     t = PIPE_COMMAND;
                 }
             }
-            else if (byte == '&') //check for syntax error here
+            else if (c == '&') //check for syntax error here
             {
                 char next = (char)get_next_byte(get_next_byte_argument);
                 if (next != '&')
@@ -338,9 +341,15 @@ make_command_stream (int (*get_next_byte) (void *),
                 else
                     t = AND_COMMAND;
             }
-            else //byte == ;
+            else //c == ;
             {
-                t = SEQUENCE_COMMAND;
+                char next = (char)get_next_byte(get_next_byte_argument);
+                shouldGetAnotherByte = false;
+                c = next;
+                if ((int)next < 0) //eof
+                    break; //don't make another node, just exit.
+                else //continue
+                    t = SEQUENCE_COMMAND;
             }
 
             if (!current_command) //if NULL, just continue
@@ -354,9 +363,11 @@ make_command_stream (int (*get_next_byte) (void *),
               cmd->input = 0;
               cmd->output = 0;
               cmd->u.command[0] = top_command; //leftside points to the current
-            
+              current_command->status = 0; //done parsing it
+
               current_command = cmd;
               top_command = cmd; //new "top" bc growing upwards
+              
               break;
             }
             else if (current_command->type == SUBSHELL_COMMAND)
@@ -375,27 +386,19 @@ make_command_stream (int (*get_next_byte) (void *),
             else //just continue otherwise
               break;
           }
+          default: break;
         } //END SWITCH
+
         //goto next byte in the loop
         if(shouldGetAnotherByte)
         {
-          int next_byte = get_next_byte(get_next_byte_argument);
-          printf("new byte: %c\n", byte);
-          if ( c == '\n' && next_byte < 0)
-            break;
-          else
-            byte = next_byte;
+          char next_byte = (char)get_next_byte(get_next_byte_argument);
+          c = next_byte;
         }
         else
-        {
-            printf("%c\n", c);
-            if ((int)c < 0)
-                break;
-        }
-
-        
-    }
-    printf("exited with value: %c\n", byte); 
+            continue; //already have the next byte
+    }//END WHILE
+    printf("exited with value: %c\n", c); 
     struct command_stream temp;
     command_stream_t r;
     r = checked_malloc(sizeof(struct command_stream));
@@ -420,7 +423,7 @@ read_command_stream (command_stream_t s)
         {
             //need to return the command and then modify the stream so we don't return it again.
             //malloc a new version and delete the old one.
-            if (the_command->status == 0) //first time being visited
+            if (the_command->status != 2) //first time being visited
             {
                 the_command->status = 2; //2 means don't check this anymore
                 return the_command; 
