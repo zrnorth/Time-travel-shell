@@ -79,6 +79,7 @@ make_command_stream (int (*get_next_byte) (void *),
     int byte = get_next_byte(get_next_byte_argument);
     while (byte > 0)
     {
+        bool shouldGetAnotherByte = true;
         char c = (char)byte;
         switch(c)
         {
@@ -156,6 +157,11 @@ make_command_stream (int (*get_next_byte) (void *),
           case '@':
           case '^':
           case '_':
+          case ' ':
+          case '\t':
+          //not really necessary to change for pure output
+          case '<':
+          case '>':
           {
             if (!current_command) //if there is no current command, first letter
             {
@@ -234,6 +240,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 cmd->type = SIMPLE_COMMAND;
                 cmd->status = 0;
                 cmd->input = 0;
+                cmd->output = 0;
                 //need to make a new string for this command to point to
                 char* str = checked_malloc(2 * sizeof(char));
                 *str = c;
@@ -253,6 +260,41 @@ make_command_stream (int (*get_next_byte) (void *),
               }
             }
           }
+
+          /*
+          //redirs
+          case '<':
+          case '>':
+          {
+            if (!current_command)
+              error(1, 0, "syntax error: can't start with an IO redirect");
+            if (current_command->type != SIMPLE_COMMAND) //has to be inside a simple command
+              error(1, 0, "syntax error: IO redirect");
+            if (c == '<' && !current_command->input) //valid input
+            {
+                char* str = checked_malloc(sizeof(char));
+                *str = '\0';
+                int len = 0;
+                while (true)
+                {
+                  c = (char)get_next_byte(get_next_byte_argument);
+                  if ((int)c < 0) break; //eof
+                  if (next == '>' || next == ' ' || next == '\t') break; //switch to output
+                  //lengthen string
+                  len++;
+                  str = checked_realloc(str, len+1); //increase size by 1
+                  *(str + (len-1)*sizeof(char)) = c;
+                  *(str + (len)*sizeof(char)) = '\0';
+                }
+                current_command->input = str; //set the input to this string
+            }
+          } */
+                  
+                    
+
+                
+              
+                
           //special characters
           case ';':
           case '|':
@@ -266,7 +308,11 @@ make_command_stream (int (*get_next_byte) (void *),
                 if (next == '|') //OR
                     t = OR_COMMAND;
                 else
+                {
+                    shouldGetAnotherByte = false;
+                    byte = next;
                     t = PIPE_COMMAND;
+                }
             }
             else if (byte == '&') //check for syntax error here
             {
@@ -276,7 +322,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 else
                     t = AND_COMMAND;
             }
-            else //byte == ; or \n
+            else //byte == ;
             {
                 t = SEQUENCE_COMMAND;
             }
@@ -290,6 +336,7 @@ make_command_stream (int (*get_next_byte) (void *),
               cmd->type = t;
               cmd->status = 0;
               cmd->input = 0;
+              cmd->output = 0;
               cmd->u.command[0] = top_command; //leftside points to the current
             
               current_command = cmd;
@@ -302,6 +349,7 @@ make_command_stream (int (*get_next_byte) (void *),
               cmd->type = t;
               cmd->status = 0;
               cmd->input = 0;
+              cmd->output = 0;
               cmd->u.command[0] = subshell_parent; //leftside points to the current
               
               current_command = cmd;
@@ -313,13 +361,16 @@ make_command_stream (int (*get_next_byte) (void *),
           }
         } //END SWITCH
         //goto next byte in the loop
-        int next_byte = get_next_byte(get_next_byte_argument);
-        printf("new byte: %c\n", byte);
-        if ((char)byte == '\n' && next_byte < 0)
+        if(shouldGetAnotherByte)
+        {
+          int next_byte = get_next_byte(get_next_byte_argument);
+          printf("new byte: %c\n", byte);
+          if ( c == '\n' && next_byte < 0)
             break;
-        else
+          else
             byte = next_byte;
-    
+        }
+        
     }
     printf("exited with value: %c\n", byte); 
     struct command_stream temp;
