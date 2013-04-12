@@ -33,44 +33,6 @@ make_command_stream (int (*get_next_byte) (void *),
   /* FIXME: Replace this with your implementation.  You may need to
      add auxiliary functions and otherwise modify the source code.
      You can also use external functions defined in the GNU C Library.  */
-
-    //Right now this just tries to create a simple command from all inputs.
-    /*
-    struct command_stream tempstr;
-    command_stream_t r;
-    r = checked_malloc(sizeof(struct command_stream));
-    *r = tempstr; //init
-    
-    struct command cmd;
-    cmd.type = SIMPLE_COMMAND;
-    cmd.status = 0;
-    cmd.input = 0;
-    cmd.output = 0;
-
-    //Temp implementation: get all the chars from the input script and output as 1 command.
-    char* b = checked_malloc(sizeof(char));
-    int num_bytes_read = 0;
-   
-    int the_byte = get_next_byte(get_next_byte_argument);
-    while (the_byte > 0) //-1 on EOF
-    {
-        num_bytes_read++;
-        b = checked_realloc(b, num_bytes_read+1); //needs to be null terminated
-        *(b + (num_bytes_read-1)*sizeof(char)) = the_byte;
-        the_byte = get_next_byte(get_next_byte_argument); 
-    }
-    *(b + (num_bytes_read)*sizeof(char)) = '\0'; //last value is null-term
-
-    //b holds all the chars input from the shell. Now make a pointer to it and put it
-    //in the command stream.
-    char** fbptr = checked_malloc(sizeof(char*));
-    *fbptr = b;
-    cmd.u.word = fbptr;
-
-    r->c = cmd;
-    return r;
-    */ 
-    //new
     
     command_t current_command = NULL;
     command_t top_command = NULL;
@@ -159,7 +121,6 @@ make_command_stream (int (*get_next_byte) (void *),
           case ' ':
           case '\t':
           {
-            printf("found a char\n");
             if (!current_command) //if there is no current command, first letter
             {
               command_t cmd = checked_malloc(sizeof(struct command));
@@ -276,7 +237,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 {
                   c = (char)get_next_byte(get_next_byte_argument);
                   if ((int)c < 0) break; //eof
-                  if (c == '>' || c == '|' || c == '&' || c == '\n') break; //switch to output
+                  if (c == '>' || c == '|' || c == '&' || c == '\n' || c=='(' || c==')') break; //switch to output
                   if (c == ' ' || c == '\t') continue; // ignore whitespace
                   //lengthen string
                   len++;
@@ -284,7 +245,6 @@ make_command_stream (int (*get_next_byte) (void *),
                   *(str + (len-1)*sizeof(char)) = c;
                   *(str + (len)*sizeof(char)) = '\0';
                 }
-                printf("%c\n", *str);
                 current_command->input = str; //set the input to this string
             }
             if (c == '>' && !current_command->output) //valid output
@@ -297,7 +257,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 {
                   c = (char)get_next_byte(get_next_byte_argument);
                   if ((int)c < 0) break; //eof
-                  if (c == '>' || c == '|' || c == '&' || c == '\n') break; //switch to output
+                  if (c == '>' || c == '|' || c == '&' || c == '\n' || c=='(' || c == ')') break; //switch to output
                   if (c == ' ' || c == '\t') continue;
                   //lengthen string
                   len++;
@@ -305,14 +265,67 @@ make_command_stream (int (*get_next_byte) (void *),
                   *(str + (len-1)*sizeof(char)) = c;
                   *(str + (len)*sizeof(char)) = '\0';
                 }
-                printf("%c\n", *str);
                 current_command->output = str;
              }
             current_command->status = 0; //no more input possible for this command   
             break;
           } 
+/*
+          //subshell stuff
+          case '(':
+          {
+            if (current_command && current_command->type == SIMPLE_COMMAND)
+              error(1, 0, "syntax error");
+            else
+            {
+              command_t cmd = checked_malloc(sizeof(struct command));
+              cmd->type = SUBSHELL_COMMAND;
+              cmd->status = -1;
+              cmd->input = 0; 
+              cmd->output = 0;
               
-                
+              subshell_parent = current_command;
+
+              shouldGetAnotherByte = false;
+              char* str = checked_malloc(sizeof(char));
+              *str = '\0';
+              int len = 0;
+
+              command_t subshell_cmd = checked_malloc(sizeof(struct command));
+              cmd->type = SIMPLE_COMMAND;
+              cmd->status = -1;
+              cmd->input = 0; 
+              cmd->output = 0;
+              while (true)
+              {
+                c = (char)get_next_byte(get_next_byte_argument);
+                if ((int)c < 0) break; //eof
+                if (c == ')')
+                {
+                  shouldGetAnotherByte = true;
+                  break;
+                }
+                //if (c == '(')
+                  // do something
+                len++;
+                str = checked_realloc(str, len+1);
+                *(str + (len-1)*sizeof(char)) = c;
+                *(str + (len)*sizeof(char)) = '\0';
+              }
+              subshell_cmd->u.word = &str;
+
+              cmd->u.subshell_command = subshell_cmd; //point the outer at the new cmd
+            }
+            break;
+          } */
+            
+          case '(':
+          case ')': //just ignore
+          {
+            break;
+          }
+          
+          
           //special characters
           case ';':
           case '|':
@@ -388,17 +401,16 @@ make_command_stream (int (*get_next_byte) (void *),
           }
           default: break;
         } //END SWITCH
-
         //goto next byte in the loop
         if(shouldGetAnotherByte)
         {
           char next_byte = (char)get_next_byte(get_next_byte_argument);
+          printf("C=  %i\n", next_byte);
           c = next_byte;
         }
         else
             continue; //already have the next byte
     }//END WHILE
-    printf("exited with value: %c\n", c); 
     struct command_stream temp;
     command_stream_t r;
     r = checked_malloc(sizeof(struct command_stream));
@@ -457,44 +469,6 @@ read_command_stream (command_stream_t s)
             }
             else
                 return NULL;
-
-            /*
-            command_t leftside = the_command->u.command[0];
-            command_t rightside = the_command->u.command[1];
-            if (leftside && leftside->status != 2 && the_command->status==0)
-            //indicates not already visited
-            { 
-                struct command_stream new;
-                new.c = *leftside;
-                command_stream_t n = &new;
-                command_t ls_returned = read_command_stream(n);
-                if (ls_returned)
-                {
-                    //update to point to the modified values
-                    *the_command->u.command[0] = n->c;
-                    return ls_returned;
-                }
-                    
-            }
-
-            the_command->status = 1; //no longer want to check that side
-            if (rightside && rightside->status != 2)
-            { //right
-                 
-                struct command_stream new;
-                new.c = *rightside;
-                command_stream_t n = &new;
-                command_t rs_returned = read_command_stream(n);
-                //update the "real" copy with the "working" copy
-                if (rs_returned)
-                {
-                    *the_command->u.command[1] = n->c;
-                    return rs_returned;
-                }
-            }
-            the_command->status = 2; //no longer want to check this nod
-            return NULL; //default
-            */
         }
 
 
@@ -505,5 +479,4 @@ read_command_stream (command_stream_t s)
         }
     }
     return 0; //should never reach here (default should catch all)
-  //Since we currently can just deal with one command, we pull the command and print it.
 }

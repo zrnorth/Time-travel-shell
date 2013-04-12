@@ -1,4 +1,5 @@
-This is a skeleton for CS 111 Lab 1.
+My code should work for all the test cases individually. I struggled to implement
+the subshell functions, so right now my code just ignores '(' and ')'s.
 
-Replace this README file with notes on your implementation.
-Mentions any special features or limitations.
+Everything else should be correctly handled, except some syntax rules I didn't have
+time to implement. For example, \ns are sometimes allowed in places they shouldn't be.
