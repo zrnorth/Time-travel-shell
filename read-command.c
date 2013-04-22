@@ -414,12 +414,38 @@ make_command_stream (int (*get_next_byte) (void *),
                     top_cmd = cmd;
                     break;
                 }
-                else if (prev_cmd->type == AND_COMMAND || 
-                         prev_cmd->type == OR_COMMAND  ||
-                         prev_cmd->type == SEQUENCE_COMMAND ||
-                         prev_cmd->type == PIPE_COMMAND)
+                else if (prev_cmd->type == PIPE_COMMAND) //this has a higher precedence
                 {
-                    prev_cmd->u.command[1] = cmd; //rightside points to new word
+                    prev_cmd->u.command[1] = cmd;
+                    prev_cmd->status = 0;
+                    prev_cmd = cmd;
+                }
+                else if (prev_cmd->type == AND_COMMAND || //lower precedence, so need to check
+                         prev_cmd->type == OR_COMMAND  ||
+                         prev_cmd->type == SEQUENCE_COMMAND)
+                {
+                    if (i < t_list->length - 1)
+                    {
+                        TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
+                        if (next_token_type == PIPE) //we need to construct this first, then.
+                        {
+                            command_t pipe_command = init_compound_cmd(cmd, PIPE_COMMAND);
+                            int search = i+2; //we're moving to the "rightside"
+                            while (t_list->tok[search].type == NEWLINE) 
+                                search++; //skip the newlines
+                            if (t_list->tok[search].type == WORD) 
+                            {
+                                command_t rightside = init_simple_cmd(&(t_list->tok[search]));
+                                pipe_command->u.command[1] = rightside;
+                                pipe_command->status = 0; //complete the pipe
+                                cmd = pipe_command; //change current command
+                                i = search; //jump ahead
+                            }
+                            else syntax_error();
+                        }
+                        //else, do nothing, because syntax doesn't fit.
+                    }
+                    prev_cmd->u.command[1] = cmd; //rightside points to new word/pipe
                     prev_cmd->status = 0; //indicates a "complete" statement
                     prev_cmd = cmd;
                     
@@ -527,18 +553,23 @@ make_command_stream (int (*get_next_byte) (void *),
             if (!prev_cmd || i == t_list->length - 1) syntax_error();
             TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
 
-            if (prev_token_type != WORD || prev_cmd->type != SIMPLE_COMMAND) //only valid syntax
+            if (prev_token_type != WORD) //only valid syntax
                 syntax_error();
             //need to get the input first, and then check for output.
+            //first traverse to the bottom right of the tree (most recent)
+            command_t our_cmd = prev_cmd;
+            while (our_cmd->type != SIMPLE_COMMAND)
+                our_cmd = our_cmd->u.command[1];
             //also, we want to trim the whitespace from the word (because eggert does)
-            *prev_cmd->u.word = trim_whitespace(*prev_cmd->u.word, true);
+            
+            *our_cmd->u.word = trim_whitespace(*our_cmd->u.word, true);
             i++;
             TOKEN_TYPE input_type = t_list->tok[i].type;
-            if (input_type != WORD || prev_cmd->input) syntax_error();
+            if (input_type != WORD || our_cmd->input) syntax_error();
             else
             {
                 //a little hackish; trim the leading / trailing spaces
-                prev_cmd->input = trim_whitespace(t_list->tok[i].token_str, false);
+                our_cmd->input = trim_whitespace(t_list->tok[i].token_str, false);
 
             }
             if (t_list->tok[i+1].type == OUTPUT) //we have an output as well
@@ -546,9 +577,9 @@ make_command_stream (int (*get_next_byte) (void *),
                 i++; //move to the output token
                 i++; //move to the output word
                 TOKEN_TYPE output_type = t_list->tok[i].type;
-                if (output_type != WORD || prev_cmd->output) syntax_error();
+                if (output_type != WORD || our_cmd->output) syntax_error();
                 else
-                    prev_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
+                    our_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
             }
             //else, just continue. allowed to specify an input and no output.
             break;
@@ -561,13 +592,17 @@ make_command_stream (int (*get_next_byte) (void *),
             
             if (prev_token_type != WORD || prev_cmd->type != SIMPLE_COMMAND)
                 syntax_error();
+            //need to traverse to "bottom right" of the tree
+            command_t our_cmd = prev_cmd;
+            while (our_cmd->type != SIMPLE_COMMAND)
+                our_cmd = our_cmd->u.command[1];
             //we want to trim the whitespace from the word (because eggert does)
-            *prev_cmd->u.word = trim_whitespace(*prev_cmd->u.word, true);
+            *our_cmd->u.word = trim_whitespace(*our_cmd->u.word, true);
             i++; //move to the output word
             TOKEN_TYPE output_type = t_list->tok[i].type;
-            if (output_type != WORD || prev_cmd->output) syntax_error();
+            if (output_type != WORD || our_cmd->output) syntax_error();
             else
-                prev_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
+                our_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
             break;
         }
 
