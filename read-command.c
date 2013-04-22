@@ -135,7 +135,7 @@ tokenize_string (char* input)
             new_str[1] = '\0';
             
             curr.token_str = new_str; 
-            if (c == ';') 
+            if (c == ';')
                 curr.type = SEMICOLON;
             else
                 curr.type = NEWLINE;
@@ -463,8 +463,12 @@ make_command_stream (int (*get_next_byte) (void *),
         }
         case NEWLINE: //basically the same as a semicolon except we can ignore in many cases
         {
-            if (!prev_cmd || i == t_list->length - 1) //ignore leading / trailing newlines.
+            if (!prev_cmd) //ignore leading newlines.
                 break;
+            while (i < t_list->length - 1 && t_list->tok[i+1].type == NEWLINE) 
+                i++; //ignore multiple newlines.
+            if (i == t_list->length - 1) break; //ignore trailing newlines.
+
             TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
             TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
             if (prev_token_type == INPUT || prev_token_type == OUTPUT)
