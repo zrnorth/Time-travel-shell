@@ -19,464 +19,566 @@
 
 //Command_stream needs to have a head an
 
+
+
 struct command_stream
 {
 	struct command c;
+    int num_commands;
 };
 
+typedef enum //used for a tokenizer function
+{
+    NONE,
+    WORD,
+    SEMICOLON,
+    NEWLINE,
+    PIPE,
+    AND,
+    OR,
+    BEGIN_SUBSHELL,
+    END_SUBSHELL,
+    INPUT,
+    OUTPUT
+} TOKEN_TYPE;
 
+//returns a stream of tokenized commands
+
+typedef struct
+{
+    char* token_str;
+    TOKEN_TYPE type;
+} token ;
+
+typedef struct
+{
+    token* tok;
+    int length;
+} token_list;
+
+void syntax_error() //call this when there is some sort of syntax error
+{
+    printf("Syntax error in input file\n");
+    exit(1);
+}
+
+//helper function to append a token to the token list.
+//DOES NOT MODIFY THE LENGTH INT. need to do that manually.
+token* append_token_to_list (token* old_list, int old_length, token new)
+{
+    //make a new list one larget
+    old_list = checked_realloc(old_list, ((old_length+1) * sizeof(token)));
+    *(old_list + old_length) = new; //append the new value
+    return old_list;
+}
+
+char* str_cat_char(char* string, char new_char) //helper function to append a char to a str
+{
+
+    int length = strlen(string)+1;
+    string = checked_realloc(string, length);
+    string[length-1] = new_char;
+    string[length] = 0;
+    return string;
+}
+
+
+//tokenizes the string and returns it in a tidy list.
+token_list*
+tokenize_string (char* input)
+{
+    token_list* tl = checked_malloc(sizeof(token_list));
+    tl->tok = NULL;
+    tl->length = 0;
+
+
+    //initialize our first token
+    token curr;
+    curr.token_str = NULL;
+    curr.type = NONE;
+    
+    int str_length = strlen(input);
+    int i;
+    for (i = 0; i < str_length; i++)
+    {
+        char c = input[i];
+        switch(c)
+        {
+        case '#': //comment
+        {
+            //its a syntax error if a comment is immediately preceded by a token.
+            //these are the only valid instances:
+            if (!input[i-1] || input[i-1] == ' ' || input[i-1] == '\n' || input[i-1] == '\t')
+            {
+                while (input[i] != '\n' && i < str_length)
+                {
+                    i++; //just continue until a newline is found, or EOF.
+                }
+            }
+            else 
+                syntax_error();
+            break;
+        }
+        case ';':
+        case '\n': //end of seq token
+        {
+            //first, append current token if it is not NULL (if it is just ignore)
+            if (curr.type != NONE)
+            {
+                tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                tl->length++;
+            }
+            //next, reinit to a SEQ token
+            
+            char* new_str = checked_malloc(2 * sizeof(char));
+            new_str[0] = c;
+            new_str[1] = '\0';
+            
+            curr.token_str = new_str; 
+            if (c == ';') 
+                curr.type = SEMICOLON;
+            else
+                curr.type = NEWLINE;
+            //continue with next char
+            break;
+        }
+
+        case '|': //need to check if pipe or OR
+        {
+            if (curr.type != NONE)
+            {
+                tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                tl->length++;
+            }
+            if (i == str_length-1 || input[i+1] != '|') //PIPE
+            {
+                char* new_str = checked_malloc(2 * sizeof(char));
+                new_str[0] = c;
+                new_str[1] = '\0';
+                curr.token_str = new_str;
+                curr.type = PIPE;
+            }
+            else //AND
+            {
+                char* new_str = checked_malloc(3 * sizeof(char));
+                new_str[0] = c;
+                new_str[1] = input[i+1]; //should be '|', of course.
+                new_str[2] = '\0';
+                curr.token_str = new_str;
+                curr.type = OR;
+                i++; //to avoid reading twice
+            }
+            break;
+        }
+
+        case '&': //need to check if to &&s, else syntax error
+        {
+            if (curr.type != NONE)
+            {
+                tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                tl->length++;
+            }
+            if (i == str_length-1 || input[i+1] != '&') //syntax error; need &&
+                syntax_error();
+            else
+            {
+                char* new_str = checked_malloc(3 * sizeof(char));
+                new_str[0] = c;
+                new_str[1] = input[i+1]; //should be '|', of course.
+                new_str[2] = '\0';
+                curr.token_str = new_str;
+                curr.type = AND;
+                i++; //so we don't read it twice
+            }
+            break;
+        }
+
+        case '(': //beginning of a subshell
+        {
+            if (curr.type != NONE)
+            {
+                tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                tl->length++;
+            }
+            char* new_str = checked_malloc(2 * sizeof(char));
+            new_str[0] = c;
+            new_str[1] = '\0';
+            curr.token_str = new_str;
+            curr.type = BEGIN_SUBSHELL;
+            break;
+        }
+
+        case ')': //beginning of a subshell
+        {
+            if (curr.type != NONE)
+            {
+                tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                tl->length++;
+            }
+            char* new_str = checked_malloc(2 * sizeof(char));
+            new_str[0] = c;
+            new_str[1] = '\0';
+            curr.token_str = new_str;
+            curr.type = END_SUBSHELL;
+            break;
+        }
+        
+        case '<': //beginning of a subshell
+        {
+            if (curr.type != NONE)
+            {
+                tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                tl->length++;
+            }
+            char* new_str = checked_malloc(2 * sizeof(char));
+            new_str[0] = c;
+            new_str[1] = '\0';
+            curr.token_str = new_str;
+            curr.type = INPUT;
+            break;
+        }
+        case '>': //beginning of a subshell
+        {
+            if (curr.type != NONE)
+            {
+                tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                tl->length++;
+            }
+            char* new_str = checked_malloc(2 * sizeof(char));
+            new_str[0] = c;
+            new_str[1] = '\0';
+            curr.token_str = new_str;
+            curr.type = OUTPUT;
+            break;
+        }
+       
+        case '\t':
+        case ' ': //these cases we want to ignore if not inside a word
+        {
+            if (curr.type != WORD)
+                break; //ignore
+            //else, fall through to WORD handlinga
+        }
+
+        default: // WORD
+        {
+            if (curr.type != WORD) //need to commit the token
+            {
+                if (curr.type != NONE)
+                {
+                    tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+                    tl->length++;
+                }
+            
+                curr.type = WORD;
+                curr.token_str = checked_malloc(sizeof(char));
+                *curr.token_str = '\0';
+            }
+            str_cat_char(curr.token_str, c);
+            break;
+        }
+        } //end switch
+    } //end for
+    if (curr.type != NONE) //append the last token
+    {
+
+        tl->tok = append_token_to_list(tl->tok, tl->length, curr);
+        tl->length++;
+    }
+    return tl;
+}
+
+//puts the entire stream into memory for ease
+char*
+create_command_string(int (*get_next_byte) (void *), void *gnba)
+{
+    char* the_string = checked_malloc(sizeof(char));
+    *the_string = '\0';
+    int b;
+    while ((b = get_next_byte(gnba)) > 0) //read to eof
+    {
+        if ((char)b == '\r') continue; //ignore carriage returns
+        the_string = str_cat_char(the_string, (char)b);
+    }
+    
+    for (b = 0; b < strlen(the_string); b++)
+        printf("%c", *(the_string+b));
+
+    //remove trailing "\n" or ';' or '\r's, just to make things simpler later
+
+    return the_string;
+}
+
+//helper function to initialize a simple command from a token
+command_t
+init_simple_cmd(token* tok)
+{
+    command_t cmd = checked_malloc(sizeof(struct command));
+    cmd->type = SIMPLE_COMMAND;
+    cmd->status = 0;
+    cmd->input = 0;
+    cmd->output = 0;
+    //need a ptr ptr for the word
+    char** fbptr = checked_malloc(sizeof(char*));
+    *fbptr = tok->token_str;
+    cmd->u.word = fbptr;
+
+    return cmd;
+}
+
+command_t
+init_compound_cmd(command_t leftside, enum command_type type)
+{
+    command_t cmd = checked_malloc(sizeof(struct command));
+    cmd->type = type;
+    cmd->status = -1; //incomplete statement; need a rightside.
+    cmd->input = 0;
+    cmd->output = 0;
+    //need to point the leftside to the given command
+    cmd->u.command[0] = leftside;
+    return cmd;
+}
 
 command_stream_t
 make_command_stream (int (*get_next_byte) (void *),
 		     void *get_next_byte_argument)
 {
-  /* FIXME: Replace this with your implementation.  You may need to
-     add auxiliary functions and otherwise modify the source code.
-     You can also use external functions defined in the GNU C Library.  */
+    //parse the stream into a string for ease of use
+    char* str = create_command_string(get_next_byte, get_next_byte_argument);
+    //create a list of tokens from the input string
+    token_list* t_list = tokenize_string(str);
+   
+    //now we need to parse the tokens
     
-    command_t current_command = NULL;
-    command_t top_command = NULL;
-    command_t subshell_parent = NULL;
-    
-    char c = (char)get_next_byte(get_next_byte_argument);
-    while ((int)c > 0)
+    int num_commands = 0;
+    command_t prev_cmd = NULL; //used to track which commands are parsed
+    command_t top_cmd = NULL;  //keep track of the top of the command tree.
+
+    int i;
+    for (i = 0; i < t_list->length; i++)
     {
-        bool shouldGetAnotherByte = true;
-        switch(c)
-        {
-          //normal chars
-          case 'a':
-          case 'A':
-          case 'b':
-          case 'B':
-          case 'c':
-          case 'C':
-          case 'd':
-          case 'D':
-          case 'e':
-          case 'E':
-          case 'f':
-          case 'F':
-          case 'g':
-          case 'G':
-          case 'h':
-          case 'H':
-          case 'i':
-          case 'I':
-          case 'j':
-          case 'J':
-          case 'k':
-          case 'K':
-          case 'l':
-          case 'L':
-          case 'm':
-          case 'M':
-          case 'n':
-          case 'N':
-          case 'o':
-          case 'O':
-          case 'p':
-          case 'P':
-          case 'q':
-          case 'Q':
-          case 'r':
-          case 'R':
-          case 's':
-          case 'S':
-          case 't':
-          case 'T':
-          case 'u':
-          case 'U':
-          case 'v':
-          case 'V':
-          case 'w':
-          case 'W':
-          case 'x':
-          case 'X':
-          case 'y':
-          case 'Y':
-          case 'z':
-          case 'Z':
-          case '0':
-          case '1':
-          case '2':
-          case '3':
-          case '4':
-          case '5':
-          case '6':
-          case '7':
-          case '8':
-          case '9':
-          case '!':
-          case '%':
-          case '+':
-          case ',':
-          case '-':
-          case '.':
-          case '/':
-          case ':':
-          case '@':
-          case '^':
-          case '_':
-          case ' ':
-          case '\t':
-          {
-            if (!current_command) //if there is no current command, first letter
-            {
-              command_t cmd = checked_malloc(sizeof(struct command));
-              cmd->type = SIMPLE_COMMAND;
-              cmd->status = -1; //indicates not done yet
-              cmd->input = 0;
-              cmd->output = 0;
-              //need to make a new string for this command to point to
-              char* str = checked_malloc(2 * sizeof(char));
-              *str = c;
-              *(str + sizeof(char)) = '\0'; //null terminated
-
-              //need to point the command at this string
-              char** fbptr = checked_malloc(sizeof(char*));
-              *fbptr = str;
-              cmd->u.word = fbptr;
-
-              current_command = cmd;
-              top_command = cmd;
-
-              //continue with next byte
-              break;
-            }
-            else //there is a current command
-            {
-              if (current_command->type == SIMPLE_COMMAND && current_command->status == -1)
-              {
-                char* str = *(current_command->u.word);
-                int len = strlen(str);
-                str = checked_realloc(str, len+1); //increase size by 1 and add new byte
-                *(str + (len)*sizeof(char)) = c;
-                *(str + len+1 * sizeof(char)) = '\0'; //re-nullterminate
-
-                
-                //reinit the ptr
-                char** fbptr = checked_malloc(sizeof(char*));
-                *fbptr = str;
-                current_command->u.word = fbptr;
-
-                break;
-              }
-              else if (current_command->type == SUBSHELL_COMMAND)
-              {
-                //inside a subshell, need to point it to a new simple command
-                command_t cmd = checked_malloc(sizeof(struct command));
-                cmd->type = SIMPLE_COMMAND;
-                cmd->status = -1;
-                cmd->input = 0;
-                cmd->output = 0;
-                //need to make a new string for this command to point to
-                char* str = checked_malloc(2 * sizeof(char));
-                *str = c;
-                *(str + sizeof(char)) = '\0'; //null terminated
-
-                //need to point the command at this string
-                char** fbptr = checked_malloc(sizeof(char*));
-                *fbptr = str;
-                cmd->u.word = fbptr;
-
-                //point the old command to this new one and then "go into" it for next byte
-                current_command->u.subshell_command = cmd;
-                subshell_parent = current_command;
-                //change current to the "inside"
-                current_command = cmd;
-                
-                //top does not move so we can "get back"
+        //TODO: debug
+        printf("\ntoken #: %i ... with type %i\n", i, t_list->tok[i].type);
+        int j;
+        for (j = 0; j < strlen(t_list->tok[i].token_str); j++)
+            printf("%c", t_list->tok[i].token_str[j]);
         
-                break;
-              }
 
-              else //AND, OR, SEQ, or PIPE
-              {
-                //need to make the "rightside" for this tree
-                command_t cmd = checked_malloc(sizeof(struct command));
-                cmd->type = SIMPLE_COMMAND;
-                cmd->status = -1;
-                cmd->input = 0;
-                cmd->output = 0;
-                //need to make a new string for this command to point to
-                char* str = checked_malloc(2 * sizeof(char));
-                *str = c;
-                *(str + sizeof(char)) = '\0'; //null terminated
-
-                //need to point the command at this string
-                char** fbptr = checked_malloc(sizeof(char*));
-                *fbptr = str;
-                cmd->u.word = fbptr;
-                
-                current_command->u.command[1] = cmd; //rightside pts to new branch
-                current_command = cmd;
-                //top stays the same.
-
-
-                break;
-              }
-            }
-          }
-
-          //redirs
-          case '<':
-          case '>':
-          {
-            if (!current_command)
-              error(1, 0, "syntax error: can't start with an IO redirect");
-            if (current_command->type != SIMPLE_COMMAND) //has to be inside a simple command
-              error(1, 0, "syntax error: IO redirect");
-            if (c == '<' && !current_command->input && !current_command->output) //valid input
-            {
-                shouldGetAnotherByte = false;
-                char* str = checked_malloc(sizeof(char));
-                *str = '\0';
-                int len = 0;
-                while (true)
-                {
-                  c = (char)get_next_byte(get_next_byte_argument);
-                  if ((int)c < 0) break; //eof
-                  if (c == '>' || c == '|' || c == '&' || c == '\n' || c=='(' || c==')') break; //switch to output
-                  if (c == ' ' || c == '\t') continue; // ignore whitespace
-                  //lengthen string
-                  len++;
-                  str = checked_realloc(str, len+1); //increase size by 1
-                  *(str + (len-1)*sizeof(char)) = c;
-                  *(str + (len)*sizeof(char)) = '\0';
-                }
-                current_command->input = str; //set the input to this string
-            }
-            if (c == '>' && !current_command->output) //valid output
-            {
-                shouldGetAnotherByte = false;
-                char* str = checked_malloc(sizeof(char));
-                *str = '\0';
-                int len = 0;
-                while (true)
-                {
-                  c = (char)get_next_byte(get_next_byte_argument);
-                  if ((int)c < 0) break; //eof
-                  if (c == '>' || c == '|' || c == '&' || c == '\n' || c=='(' || c == ')') break; //switch to output
-                  if (c == ' ' || c == '\t') continue;
-                  //lengthen string
-                  len++;
-                  str = checked_realloc(str, len+1); //increase size by 1
-                  *(str + (len-1)*sizeof(char)) = c;
-                  *(str + (len)*sizeof(char)) = '\0';
-                }
-                current_command->output = str;
-             }
-            current_command->status = 0; //no more input possible for this command   
+        //TODO: end debug
+        switch(t_list->tok[i].type)
+        {
+        case NONE: //should never have a token with NONE type; error
+            syntax_error();
             break;
-          } 
-/*
-          //subshell stuff
-          case '(':
-          {
-            if (current_command && current_command->type == SIMPLE_COMMAND)
-              error(1, 0, "syntax error");
+        case WORD:
+        {
+            //TODO: unsure if this is correct syntaxwise
+            if (prev_cmd && prev_cmd->type == SIMPLE_COMMAND)
+                syntax_error(); //can't have 2 simple commands in a row
             else
             {
-              command_t cmd = checked_malloc(sizeof(struct command));
-              cmd->type = SUBSHELL_COMMAND;
-              cmd->status = -1;
-              cmd->input = 0; 
-              cmd->output = 0;
-              
-              subshell_parent = current_command;
-
-              shouldGetAnotherByte = false;
-              char* str = checked_malloc(sizeof(char));
-              *str = '\0';
-              int len = 0;
-
-              command_t subshell_cmd = checked_malloc(sizeof(struct command));
-              cmd->type = SIMPLE_COMMAND;
-              cmd->status = -1;
-              cmd->input = 0; 
-              cmd->output = 0;
-              while (true)
-              {
-                c = (char)get_next_byte(get_next_byte_argument);
-                if ((int)c < 0) break; //eof
-                if (c == ')')
+                command_t cmd = init_simple_cmd(&(t_list->tok[i])); //create a simple command
+                num_commands++;
+                if (!prev_cmd) // first command in list
                 {
-                  shouldGetAnotherByte = true;
-                  break;
+                    prev_cmd = cmd;
+                    top_cmd = cmd;
+                    break;
                 }
-                //if (c == '(')
-                  // do something
-                len++;
-                str = checked_realloc(str, len+1);
-                *(str + (len-1)*sizeof(char)) = c;
-                *(str + (len)*sizeof(char)) = '\0';
-              }
-              subshell_cmd->u.word = &str;
-
-              cmd->u.subshell_command = subshell_cmd; //point the outer at the new cmd
+                else if (prev_cmd->type == AND_COMMAND || 
+                         prev_cmd->type == OR_COMMAND  ||
+                         prev_cmd->type == SEQUENCE_COMMAND ||
+                         prev_cmd->type == PIPE_COMMAND)
+                {
+                    prev_cmd->u.command[1] = cmd; //rightside points to new word
+                    prev_cmd->status = 0; //indicates a "complete" statement
+                    prev_cmd = cmd;
+                    
+                }
+                else if (prev_cmd->type == SUBSHELL_COMMAND)
+                {
+                    //TODO: need a way out of the tree
+                    prev_cmd->u.subshell_command = cmd;
+                    prev_cmd = cmd;
+                }
+                else //some sort of error
+                    syntax_error();
             }
             break;
-          } */
-            
-          case '(':
-          case ')': //just ignore
-          {
-            break;
-          }
-          
-          
-          //special characters
-          case ';':
-          case '|':
-          case '&':
-          case '\n':
-          {
-            //need to get which command type first
-            enum command_type t;
-            if (c == '|') //need to check if it is a pipe or an OR
-            {
-                char next = (char)get_next_byte(get_next_byte_argument);
-                if (next == '|') //OR
-                    t = OR_COMMAND;
-                else
-                {
-                    shouldGetAnotherByte = false;
-                    c = next;
-                    t = PIPE_COMMAND;
-                }
-            }
-            else if (c == '&') //check for syntax error here
-            {
-                char next = (char)get_next_byte(get_next_byte_argument);
-                if (next != '&')
-                    error(1, 0, "syntax error in input");
-                else
-                    t = AND_COMMAND;
-            }
-            else //c == ;
-            {
-                char next = (char)get_next_byte(get_next_byte_argument);
-                shouldGetAnotherByte = false;
-                c = next;
-                if ((int)next < 0) //eof
-                    break; //don't make another node, just exit.
-                else //continue
-                    t = SEQUENCE_COMMAND;
-            }
-
-            if (!current_command) //if NULL, just continue
-              break;
-            else if (current_command->type == SIMPLE_COMMAND)
-            {
-              //grow upwards; the current command becomes the leftside
-              command_t cmd = checked_malloc(sizeof(struct command));
-              cmd->type = t;
-              cmd->status = 0;
-              cmd->input = 0;
-              cmd->output = 0;
-              cmd->u.command[0] = top_command; //leftside points to the current
-              current_command->status = 0; //done parsing it
-
-              current_command = cmd;
-              top_command = cmd; //new "top" bc growing upwards
-              
-              break;
-            }
-            else if (current_command->type == SUBSHELL_COMMAND)
-            {
-              command_t cmd = checked_malloc(sizeof(struct command));
-              cmd->type = t;
-              cmd->status = 0;
-              cmd->input = 0;
-              cmd->output = 0;
-              cmd->u.command[0] = subshell_parent; //leftside points to the current
-              
-              current_command = cmd;
-              //modify the subshell parent to point to this new command
-              subshell_parent->u.subshell_command = current_command;
-            }
-            else //just continue otherwise
-              break;
-          }
-          default: break;
-        } //END SWITCH
-        //goto next byte in the loop
-        if(shouldGetAnotherByte)
-        {
-          char next_byte = (char)get_next_byte(get_next_byte_argument);
-          printf("C=  %i\n", next_byte);
-          c = next_byte;
         }
-        else
-            continue; //already have the next byte
-    }//END WHILE
+        case NEWLINE: //basically the same as a semicolon except we can ignore in many cases
+        {
+            if (!prev_cmd || i == t_list->length - 1) //ignore leading / trailing newlines.
+                break;
+            TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
+            TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
+            if (prev_token_type == INPUT || prev_token_type == OUTPUT)
+                syntax_error();
+            if (prev_cmd->type == SEQUENCE_COMMAND)
+                break; //not a syntax error, but ignore subsequent newlines after \n or ;
+            if (next_token_type != BEGIN_SUBSHELL &&
+                next_token_type != END_SUBSHELL   &&
+                next_token_type != WORD)
+                    syntax_error();
+            //else, this is a valid newline and we want to treat it like a semicolon
+            command_t cmd = init_compound_cmd(top_cmd, SEQUENCE_COMMAND);
+            top_cmd = cmd;
+            num_commands++;
+            prev_cmd = cmd;
+            break;
+        }
+        
+        case SEMICOLON:
+        {
+            //only valid if previous command was a simple command or sequence
+            if (!prev_cmd) syntax_error();
+            if (i == 0 || i == t_list->length - 1) //we ignore trailing semicolons
+                break;
+            TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
+            TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
+
+            if ((prev_token_type == WORD || 
+                 prev_token_type == END_SUBSHELL) && 
+
+               ( next_token_type == WORD ||
+                 next_token_type == BEGIN_SUBSHELL ||
+                 next_token_type == NEWLINE))
+            {
+                //TODO: need a way "up" the tree
+                command_t cmd = init_compound_cmd(top_cmd, SEQUENCE_COMMAND);
+                top_cmd = cmd;
+                num_commands++;
+                prev_cmd = cmd;
+                break;
+            }
+            else syntax_error();
+
+        }
+
+        case PIPE:
+        case AND:
+        case OR:
+        {
+            
+            if (!prev_cmd || i == t_list->length - 1) syntax_error();
+            TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
+            TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
+
+
+            if ((prev_token_type == WORD ||
+                 prev_token_type == END_SUBSHELL) &&
+
+                (next_token_type == NEWLINE ||
+                 next_token_type == WORD    ||
+                 next_token_type == BEGIN_SUBSHELL))
+            {
+                //TODO: up the tree
+                command_t cmd;
+                if (t_list->tok[i].type == PIPE)
+                    cmd = init_compound_cmd(top_cmd, PIPE_COMMAND);
+                else if (t_list->tok[i].type == AND)
+                    cmd = init_compound_cmd(top_cmd, AND_COMMAND);
+                else if (t_list->tok[i].type == OR)
+                    cmd = init_compound_cmd(top_cmd, OR_COMMAND);
+                else //huh wtf
+                    syntax_error();
+                top_cmd = cmd;
+                num_commands++;
+                prev_cmd = cmd;
+                break;
+            }
+            else syntax_error();
+        }
+        case BEGIN_SUBSHELL:
+            break;
+        case END_SUBSHELL:
+            break;
+        case INPUT:
+        {
+            if (!prev_cmd || i == t_list->length - 1) syntax_error();
+            TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
+
+            if (prev_token_type != WORD || prev_cmd->type != SIMPLE_COMMAND) //only valid syntax
+                syntax_error();
+            //need to get the input first, and then check for output.
+            i++;
+            TOKEN_TYPE input_type = t_list->tok[i].type;
+            if (input_type != WORD || prev_cmd->input) syntax_error();
+            else
+                prev_cmd->input = t_list->tok[i].token_str;
+            if (t_list->tok[i+1].type == OUTPUT) //we have an output as well
+            {
+                i++; //move to the output token
+                i++; //move to the output word
+                TOKEN_TYPE output_type = t_list->tok[i].type;
+                if (output_type != WORD || prev_cmd->output) syntax_error();
+                else
+                    prev_cmd->output = t_list->tok[i].token_str;
+            }
+            //else, just continue. allowed to specify an input and no output.
+            break;
+        }
+        case OUTPUT:
+        {
+            if (!prev_cmd || i == t_list->length - 1) syntax_error();
+            
+            TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
+            
+            if (prev_token_type != WORD || prev_cmd->type != SIMPLE_COMMAND)
+                syntax_error();
+            i++; //move to the output word
+            TOKEN_TYPE output_type = t_list->tok[i].type;
+            if (output_type != WORD || prev_cmd->output) syntax_error();
+            else
+                prev_cmd->output = t_list->tok[i].token_str;
+            break;
+        }
+
+        } //end switch
+    }//end for
     struct command_stream temp;
     command_stream_t r;
     r = checked_malloc(sizeof(struct command_stream));
-    *r = temp; //init
-    r->c = *top_command; //point it to the top of the tree
+    *r = temp; //init to blank.
+    r->c = *top_cmd;
+    r->num_commands = num_commands;
+    //printf("Top command: %s\n", *(top_cmd->u.word));
+    printf("Number of commands: %i\n", num_commands);
     return r;
-              
-
-  //error (1, 0, "command reading not yet implemented");
-  //keeping this as a comment because don't remember how to do "error" lol
 }
 
 command_t
 read_command_stream (command_stream_t s)
 {
-  /* FIXME: Replace this with your implementation too.  */
     command_t the_command = &(s->c);
-
     switch (the_command->type)
     {
-        case SIMPLE_COMMAND: //leaf of the tree
+        case SIMPLE_COMMAND:
         {
-            //need to return the command and then modify the stream so we don't return it again.
-            //malloc a new version and delete the old one.
-            if (the_command->status != 2) //first time being visited
+            if (the_command->status != 2) //2 means do not visit anymore
             {
-                the_command->status = 2; //2 means don't check this anymore
-                return the_command; 
-            }
-            else
-                return NULL;
-        }
-        case SUBSHELL_COMMAND: //we are in a subshell, so need to execute the subcommands
-        {
-            command_t subcmd = the_command->u.subshell_command;
-            if (!subcmd || subcmd->status !=0) 
-                return NULL;
-            else
-            {
-                struct command_stream new;
-                new.c = *subcmd;
-                command_stream_t n = &new;
                 the_command->status = 2;
-                return read_command_stream(n);
+                printf("Returning a command with: %s\n", *(the_command->u.word));
+                return the_command;
             }
+            else return NULL; //already visited this leaf
         }
+        case SUBSHELL_COMMAND: //TODO: implement
+            return NULL;
+
         case SEQUENCE_COMMAND:
         case AND_COMMAND:
         case OR_COMMAND:
         case PIPE_COMMAND:
         {
-            if (the_command->status == 0)
+            if (the_command->status == 0) //havent visited either child node
             {
                 the_command->status = 1;
                 return the_command;
             }
-            else
-                return NULL;
+            else return NULL;
         }
-
-
-        default:
-        {
-            //This gets called if the stream is empty (reached the end)
-            return NULL;
-        }
+        default: return NULL; //should never get here but ya never knokw.
     }
-    return 0; //should never reach here (default should catch all)
+    return 0; 
 }
