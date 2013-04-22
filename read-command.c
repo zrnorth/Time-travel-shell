@@ -339,6 +339,35 @@ init_compound_cmd(command_t leftside, enum command_type type)
     return cmd;
 }
 
+//helper function that removes leading and trailing whitespace, and 
+//returns a syntax error if there is more than one word in a word token.
+//Used to help with the input / output pipes (can only be 1 word)
+char*
+trim_whitespace(char* input, bool inside_spaces_allowed)
+{
+    char* end;
+    while (isspace(*input)) input++; //ignore leading spaces
+    if (*input == 0)
+        syntax_error(); //this indicates all spaces (bad)
+
+    end = input + strlen(input) - 1;
+    while (end > input && isspace(*end))
+        end--; //get rid of trailing spaces
+
+    *(end+1) = 0; //nullterminate
+    if (!inside_spaces_allowed)
+    {
+        int i;
+        for (i = 0; i < strlen(input); i++) //iterate through the new string
+        {
+            if (input[i] == ' ') //inside space
+                syntax_error();
+        }
+    }
+    //else, all good
+    return input;
+}
+
 command_stream_t
 make_command_stream (int (*get_next_byte) (void *),
 		     void *get_next_byte_argument)
@@ -414,8 +443,8 @@ make_command_stream (int (*get_next_byte) (void *),
             TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
             if (prev_token_type == INPUT || prev_token_type == OUTPUT)
                 syntax_error();
-            if (prev_cmd->type == SEQUENCE_COMMAND)
-                break; //not a syntax error, but ignore subsequent newlines after \n or ;
+            if (prev_cmd->type != SIMPLE_COMMAND)
+                break; //not a syntax error, but we just treat it as whitespace
             if (next_token_type != BEGIN_SUBSHELL &&
                 next_token_type != END_SUBSHELL   &&
                 next_token_type != WORD)
@@ -501,11 +530,17 @@ make_command_stream (int (*get_next_byte) (void *),
             if (prev_token_type != WORD || prev_cmd->type != SIMPLE_COMMAND) //only valid syntax
                 syntax_error();
             //need to get the input first, and then check for output.
+            //also, we want to trim the whitespace from the word (because eggert does)
+            *prev_cmd->u.word = trim_whitespace(*prev_cmd->u.word, true);
             i++;
             TOKEN_TYPE input_type = t_list->tok[i].type;
             if (input_type != WORD || prev_cmd->input) syntax_error();
             else
-                prev_cmd->input = t_list->tok[i].token_str;
+            {
+                //a little hackish; trim the leading / trailing spaces
+                prev_cmd->input = trim_whitespace(t_list->tok[i].token_str, false);
+
+            }
             if (t_list->tok[i+1].type == OUTPUT) //we have an output as well
             {
                 i++; //move to the output token
@@ -513,7 +548,7 @@ make_command_stream (int (*get_next_byte) (void *),
                 TOKEN_TYPE output_type = t_list->tok[i].type;
                 if (output_type != WORD || prev_cmd->output) syntax_error();
                 else
-                    prev_cmd->output = t_list->tok[i].token_str;
+                    prev_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
             }
             //else, just continue. allowed to specify an input and no output.
             break;
@@ -526,11 +561,13 @@ make_command_stream (int (*get_next_byte) (void *),
             
             if (prev_token_type != WORD || prev_cmd->type != SIMPLE_COMMAND)
                 syntax_error();
+            //we want to trim the whitespace from the word (because eggert does)
+            *prev_cmd->u.word = trim_whitespace(*prev_cmd->u.word, true);
             i++; //move to the output word
             TOKEN_TYPE output_type = t_list->tok[i].type;
             if (output_type != WORD || prev_cmd->output) syntax_error();
             else
-                prev_cmd->output = t_list->tok[i].token_str;
+                prev_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
             break;
         }
 
