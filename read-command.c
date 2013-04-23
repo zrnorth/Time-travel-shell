@@ -23,7 +23,7 @@
 
 struct command_stream
 {
-	struct command c;
+	command_t c;
     int num_commands;
 };
 
@@ -300,10 +300,11 @@ create_command_string(int (*get_next_byte) (void *), void *gnba)
         if ((char)b == '\r') continue; //ignore carriage returns
         the_string = str_cat_char(the_string, (char)b);
     }
-    
+    //DEBUG
+    /*
     for (b = 0; b < strlen(the_string); b++)
         printf("%c", *(the_string+b));
-
+    */
     //remove trailing "\n" or ';' or '\r's, just to make things simpler later
 
     return the_string;
@@ -331,11 +332,12 @@ init_compound_cmd(command_t leftside, enum command_type type)
 {
     command_t cmd = checked_malloc(sizeof(struct command));
     cmd->type = type;
-    cmd->status = -1; //incomplete statement; need a rightside.
+    cmd->status = 0; 
     cmd->input = 0;
     cmd->output = 0;
     //need to point the leftside to the given command
     cmd->u.command[0] = leftside;
+    cmd->u.command[1] = NULL;
     return cmd;
 }
 
@@ -382,18 +384,12 @@ make_command_stream (int (*get_next_byte) (void *),
     int num_commands = 0;
     command_t prev_cmd = NULL; //used to track which commands are parsed
     command_t top_cmd = NULL;  //keep track of the top of the command tree.
+    command_t top_seq_cmd = NULL;
+    command_t last_word_parsed = NULL;
 
     int i;
     for (i = 0; i < t_list->length; i++)
     {
-        //TODO: debug
-        printf("\ntoken #: %i ... with type %i\n", i, t_list->tok[i].type);
-        int j;
-        for (j = 0; j < strlen(t_list->tok[i].token_str); j++)
-            printf("%c", t_list->tok[i].token_str[j]);
-        
-
-        //TODO: end debug
         switch(t_list->tok[i].type)
         {
         case NONE: //should never have a token with NONE type; error
@@ -407,11 +403,13 @@ make_command_stream (int (*get_next_byte) (void *),
             else
             {
                 command_t cmd = init_simple_cmd(&(t_list->tok[i])); //create a simple command
+                last_word_parsed = cmd;
                 num_commands++;
-                if (!prev_cmd) // first command in list
+                if (!prev_cmd)
                 {
                     prev_cmd = cmd;
                     top_cmd = cmd;
+                    last_word_parsed = cmd;
                     break;
                 }
                 else if (prev_cmd->type == PIPE_COMMAND) //this has a higher precedence
@@ -419,6 +417,7 @@ make_command_stream (int (*get_next_byte) (void *),
                     prev_cmd->u.command[1] = cmd;
                     prev_cmd->status = 0;
                     prev_cmd = cmd;
+                    last_word_parsed = cmd;
                 }
                 else if (prev_cmd->type == AND_COMMAND || //lower precedence, so need to check
                          prev_cmd->type == OR_COMMAND  ||
@@ -438,6 +437,7 @@ make_command_stream (int (*get_next_byte) (void *),
                                 command_t rightside = init_simple_cmd(&(t_list->tok[search]));
                                 pipe_command->u.command[1] = rightside;
                                 pipe_command->status = 0; //complete the pipe
+                                last_word_parsed = rightside;
                                 cmd = pipe_command; //change current command
                                 i = search; //jump ahead
                             }
@@ -448,7 +448,8 @@ make_command_stream (int (*get_next_byte) (void *),
                     prev_cmd->u.command[1] = cmd; //rightside points to new word/pipe
                     prev_cmd->status = 0; //indicates a "complete" statement
                     prev_cmd = cmd;
-                    
+                    if (!top_cmd) //first item in new tree
+                        top_cmd = cmd;
                 }
                 else if (prev_cmd->type == SUBSHELL_COMMAND)
                 {
@@ -465,6 +466,8 @@ make_command_stream (int (*get_next_byte) (void *),
         {
             if (!prev_cmd) //ignore leading newlines.
                 break;
+            if (prev_cmd->type == OR_COMMAND || prev_cmd->type == AND_COMMAND)
+                break; //just whitespace.
             while (i < t_list->length - 1 && t_list->tok[i+1].type == NEWLINE) 
                 i++; //ignore multiple newlines.
             if (i == t_list->length - 1) break; //ignore trailing newlines.
@@ -473,17 +476,20 @@ make_command_stream (int (*get_next_byte) (void *),
             TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
             if (prev_token_type == INPUT || prev_token_type == OUTPUT)
                 syntax_error();
-            if (prev_cmd->type != SIMPLE_COMMAND)
-                break; //not a syntax error, but we just treat it as whitespace
             if (next_token_type != BEGIN_SUBSHELL &&
                 next_token_type != END_SUBSHELL   &&
                 next_token_type != WORD)
                     syntax_error();
             //else, this is a valid newline and we want to treat it like a semicolon
-            command_t cmd = init_compound_cmd(top_cmd, SEQUENCE_COMMAND);
-            top_cmd = cmd;
-            num_commands++;
+            command_t cmd;
+            if (top_seq_cmd)
+                cmd = init_compound_cmd(top_seq_cmd, SEQUENCE_COMMAND);
+            else //first seq command
+                cmd = init_compound_cmd(top_cmd, SEQUENCE_COMMAND);
+            top_seq_cmd = cmd;
+            top_cmd = NULL; //initiate a new tree
             prev_cmd = cmd;
+            last_word_parsed = NULL; //because syntax
             break;
         }
         
@@ -504,10 +510,15 @@ make_command_stream (int (*get_next_byte) (void *),
                  next_token_type == NEWLINE))
             {
                 //TODO: need a way "up" the tree
-                command_t cmd = init_compound_cmd(top_cmd, SEQUENCE_COMMAND);
-                top_cmd = cmd;
-                num_commands++;
+                command_t cmd;
+                if (top_seq_cmd)
+                    cmd = init_compound_cmd(top_seq_cmd, SEQUENCE_COMMAND);
+                else //first seq command
+                    cmd = init_compound_cmd(top_cmd, SEQUENCE_COMMAND);
+                top_seq_cmd = cmd;
+                top_cmd = NULL; //initiate a new tree
                 prev_cmd = cmd;
+                last_word_parsed = NULL;
                 break;
             }
             else syntax_error();
@@ -531,7 +542,6 @@ make_command_stream (int (*get_next_byte) (void *),
                  next_token_type == WORD    ||
                  next_token_type == BEGIN_SUBSHELL))
             {
-                //TODO: up the tree
                 command_t cmd;
                 if (t_list->tok[i].type == PIPE)
                     cmd = init_compound_cmd(top_cmd, PIPE_COMMAND);
@@ -541,39 +551,42 @@ make_command_stream (int (*get_next_byte) (void *),
                     cmd = init_compound_cmd(top_cmd, OR_COMMAND);
                 else //huh wtf
                     syntax_error();
+
+                if (top_seq_cmd) //the current top cmd is a sequence cmd
+                    top_seq_cmd->u.command[1] = cmd; //set the top val to be this new cmd.
                 top_cmd = cmd;
-                num_commands++;
                 prev_cmd = cmd;
+                num_commands++;
                 break;
+                
             }
             else syntax_error();
         }
         case BEGIN_SUBSHELL:
+        {
+            
             break;
+        }
         case END_SUBSHELL:
             break;
         case INPUT:
         {
-            if (!prev_cmd || i == t_list->length - 1) syntax_error();
+            if (!prev_cmd || i == t_list->length - 1 || !last_word_parsed) syntax_error();
             TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
 
             if (prev_token_type != WORD) //only valid syntax
                 syntax_error();
             //need to get the input first, and then check for output.
-            //first traverse to the bottom right of the tree (most recent)
-            command_t our_cmd = prev_cmd;
-            while (our_cmd->type != SIMPLE_COMMAND)
-                our_cmd = our_cmd->u.command[1];
             //also, we want to trim the whitespace from the word (because eggert does)
             
-            *our_cmd->u.word = trim_whitespace(*our_cmd->u.word, true);
+            *last_word_parsed->u.word = trim_whitespace(*last_word_parsed->u.word, true);
             i++;
             TOKEN_TYPE input_type = t_list->tok[i].type;
-            if (input_type != WORD || our_cmd->input) syntax_error();
+            if (input_type != WORD || last_word_parsed->input) syntax_error();
             else
             {
                 //a little hackish; trim the leading / trailing spaces
-                our_cmd->input = trim_whitespace(t_list->tok[i].token_str, false);
+                last_word_parsed->input = trim_whitespace(t_list->tok[i].token_str, false);
 
             }
             if (t_list->tok[i+1].type == OUTPUT) //we have an output as well
@@ -581,11 +594,12 @@ make_command_stream (int (*get_next_byte) (void *),
                 i++; //move to the output token
                 i++; //move to the output word
                 TOKEN_TYPE output_type = t_list->tok[i].type;
-                if (output_type != WORD || our_cmd->output) syntax_error();
+                if (output_type != WORD || last_word_parsed->output) syntax_error();
                 else
-                    our_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
+                    last_word_parsed->output = trim_whitespace(t_list->tok[i].token_str, false);
             }
             //else, just continue. allowed to specify an input and no output.
+            last_word_parsed = NULL; //reset
             break;
         }
         case OUTPUT:
@@ -597,16 +611,14 @@ make_command_stream (int (*get_next_byte) (void *),
             if (prev_token_type != WORD || prev_cmd->type != SIMPLE_COMMAND)
                 syntax_error();
             //need to traverse to "bottom right" of the tree
-            command_t our_cmd = prev_cmd;
-            while (our_cmd->type != SIMPLE_COMMAND)
-                our_cmd = our_cmd->u.command[1];
             //we want to trim the whitespace from the word (because eggert does)
-            *our_cmd->u.word = trim_whitespace(*our_cmd->u.word, true);
+            *last_word_parsed->u.word = trim_whitespace(*last_word_parsed->u.word, true);
             i++; //move to the output word
             TOKEN_TYPE output_type = t_list->tok[i].type;
-            if (output_type != WORD || our_cmd->output) syntax_error();
+            if (output_type != WORD || last_word_parsed->output) syntax_error();
             else
-                our_cmd->output = trim_whitespace(t_list->tok[i].token_str, false);
+                last_word_parsed->output = trim_whitespace(t_list->tok[i].token_str, false);
+            last_word_parsed = NULL;
             break;
         }
 
@@ -616,17 +628,19 @@ make_command_stream (int (*get_next_byte) (void *),
     command_stream_t r;
     r = checked_malloc(sizeof(struct command_stream));
     *r = temp; //init to blank.
-    r->c = *top_cmd;
+    if (top_seq_cmd)
+        r->c = top_seq_cmd;
+    else 
+        r->c = top_cmd;
     r->num_commands = num_commands;
-    //printf("Top command: %s\n", *(top_cmd->u.word));
-    printf("Number of commands: %i\n", num_commands);
     return r;
 }
 
 command_t
 read_command_stream (command_stream_t s)
 {
-    command_t the_command = &(s->c);
+    command_t the_command = s->c;
+    if (!the_command) return NULL;
     switch (the_command->type)
     {
         case SIMPLE_COMMAND:
@@ -634,22 +648,52 @@ read_command_stream (command_stream_t s)
             if (the_command->status != 2) //2 means do not visit anymore
             {
                 the_command->status = 2;
-                printf("Returning a command with: %s\n", *(the_command->u.word));
                 return the_command;
             }
             else return NULL; //already visited this leaf
         }
         case SUBSHELL_COMMAND: //TODO: implement
-            return NULL;
+        {
+            if (the_command->status != 2)
+            {
+                the_command->status = 2;
+                return the_command;
+            }
+            else return NULL;
+        }
 
         case SEQUENCE_COMMAND:
+        {
+            command_stream_t substream = checked_malloc(sizeof(struct command_stream));
+            if (the_command->status == 0)
+            {
+                substream->c = the_command->u.command[0];
+                command_t retval = read_command_stream(substream);
+                if (!retval) 
+                    the_command->status = 1; 
+                else
+                    return retval;
+            }
+            if (the_command->status == 1)
+            {
+                substream->c = the_command->u.command[1];
+                command_t retval = read_command_stream(substream);
+                if (!retval)
+                    the_command->status = 2;
+                else
+                    return retval;
+            }
+            //status == 2
+            return NULL;
+        }
+
         case AND_COMMAND:
         case OR_COMMAND:
         case PIPE_COMMAND:
         {
             if (the_command->status == 0) //havent visited either child node
             {
-                the_command->status = 1;
+                the_command->status = 2;
                 return the_command;
             }
             else return NULL;
