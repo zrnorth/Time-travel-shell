@@ -348,6 +348,7 @@ init_simple_cmd(token* tok)
     command_t cmd = checked_malloc(sizeof(struct command));
     cmd->type = SIMPLE_COMMAND;
     cmd->status = 0;
+    cmd->parse_status = -1; 
     cmd->input = 0;
     cmd->output = 0;
     //need a ptr ptr for the word
@@ -365,6 +366,7 @@ init_compound_cmd(command_t leftside, enum command_type type)
     command_t cmd = checked_malloc(sizeof(struct command));
     cmd->type = type;
     cmd->status = 0; 
+    cmd->parse_status = -1; 
     cmd->input = 0;
     cmd->output = 0;
     //need to point the leftside to the given command
@@ -422,7 +424,8 @@ make_command_stream (int (*get_next_byte) (void *),
                 else if (prev_cmd->type == PIPE_COMMAND) //this has a higher precedence
                 {
                     prev_cmd->u.command[1] = cmd;
-                    prev_cmd->status = 0;
+                    prev_cmd->status = -1;
+                    prev_cmd->parse_status = 0;
                     prev_cmd = cmd;
                     last_word_parsed = cmd;
                 }
@@ -443,7 +446,8 @@ make_command_stream (int (*get_next_byte) (void *),
                             {
                                 command_t rightside = init_simple_cmd(&(t_list->tok[search]));
                                 pipe_command->u.command[1] = rightside;
-                                pipe_command->status = 0; //complete the pipe
+                                pipe_command->status = -1;
+                                pipe_command->parse_status = 0; 
                                 last_word_parsed = rightside;
                                 cmd = pipe_command; //change current command
                                 i = search; //jump ahead
@@ -453,7 +457,8 @@ make_command_stream (int (*get_next_byte) (void *),
                         //else, do nothing, because syntax doesn't fit.
                     }
                     prev_cmd->u.command[1] = cmd; //rightside points to new word/pipe
-                    prev_cmd->status = 0; //indicates a "complete" statement
+                    prev_cmd->parse_status = 0; //indicates a "complete" statement
+                    prev_cmd->status = -1;
                     prev_cmd = cmd;
                     if (!top_cmd) //first item in new tree
                         top_cmd = cmd;
@@ -681,18 +686,18 @@ read_command_stream (command_stream_t s)
         case OR_COMMAND:
         case PIPE_COMMAND:
         {
-            if (the_command->status != 2) //2 means do not visit anymore
+            if (the_command->parse_status != 2) //2 means do not visit anymore
             {
-                the_command->status = 2;
+                the_command->parse_status = 2;
                 return the_command;
             }
             else return NULL; //already visited this leaf
         }
         case SUBSHELL_COMMAND: //TODO: implement
         {
-            if (the_command->status != 2)
+            if (the_command->parse_status != 2)
             {
-                the_command->status = 2;
+                the_command->parse_status = 2;
                 return the_command;
             }
             else return NULL;
@@ -701,25 +706,25 @@ read_command_stream (command_stream_t s)
         case SEQUENCE_COMMAND:
         {
             command_stream_t substream = checked_malloc(sizeof(struct command_stream));
-            if (the_command->status == 0)
+            if (the_command->parse_status == 0)
             {
                 substream->c = the_command->u.command[0];
                 command_t retval = read_command_stream(substream);
                 if (!retval) 
-                    the_command->status = 1; 
+                    the_command->parse_status = 1; 
                 else
                     return retval;
             }
-            if (the_command->status == 1)
+            if (the_command->parse_status == 1)
             {
                 substream->c = the_command->u.command[1];
                 command_t retval = read_command_stream(substream);
                 if (!retval)
-                    the_command->status = 2;
+                    the_command->parse_status = 2;
                 else
                     return retval;
             }
-            //status == 2
+            //parse_status == 2
             return NULL;
         }
 
