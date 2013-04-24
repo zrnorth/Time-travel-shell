@@ -1,5 +1,15 @@
-My code should work for all the test cases individually. I struggled to implement
-the subshell functions, so right now my code just ignores '(' and ')'s.
+I refactored my part 1a stuff entirely much code is different from my previous 
+submission. Specifically, I made sure to design it much more modularly
+and deal with tokens rather than trying to parse the whole stream all at once.
+The result is much better I think.
 
-Everything else should be correctly handled, except some syntax rules I didn't have
-time to implement. For example, \ns are sometimes allowed in places they shouldn't be.
+My execute command is pretty simple -- it just gets a command_t as input and 
+splits off into a sub-process to run it. AND and OR commands split into two
+subshells and use their respective logic to decide what to return, where the 
+PIPE command uses the linux pipe() call so the commands can share data
+between them. 
+
+My test_1b.sh file just tries some basic shell commands and checks that each
+control construct is working correctly. Personally I think everything works, but
+there may be some underlying bugs.
+
