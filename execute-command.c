@@ -51,6 +51,40 @@ execute_command (command_t c, bool time_travel)
     time_travel = false;
 
     enum command_type type = c->type;
+
+    int old_stdin  = dup(fileno(stdin));
+    int old_stdout = dup(fileno(stdout));
+    int old_stderr = dup(fileno(stderr));
+
+    int infd = -1;
+    int outfd = -1;
+    if (c->input)
+    {
+        infd = fileno(fopen(c->input, "r"));
+        if (infd)
+        {
+            dup2(infd, fileno(stdin));
+        }
+        else
+        {
+            fprintf(stderr, "%s: No such file or directory\n", c->input);
+            return;
+        }
+    }
+    if (c->output)
+    {
+        outfd = fileno(fopen(c->output, "w"));
+        if (outfd)
+        {
+            dup2(outfd, fileno(stdout));
+            dup2(outfd, fileno(stderr));
+        }
+        else
+        {
+            fprintf(stderr, "%s: Could not open this file\n", c->output);
+            return;
+        }
+    }
     switch(type)
     {
     case SIMPLE_COMMAND:
@@ -59,31 +93,6 @@ execute_command (command_t c, bool time_travel)
         char* the_command = *c->u.word;
         
         char** cmd_tokenized = split_string(the_command);
-
-        //need to get input / output redirects, if there is some.
-        if (c->input)
-        {
-            FILE* in = fopen(c->input, "r");
-            if (in)
-                dup2(fileno(in), fileno(stdin));
-            else
-            {
-                fprintf(stderr, "%s: No such file or directory\n", c->input);
-                return;
-            }
-        }
-        if (c->output)
-        {
-            FILE* out = fopen(c->output, "w");
-            if (out)
-                dup2(fileno(out), fileno(stdout));
-            else
-            {
-                fprintf(stderr, "%s: Could not open this file\n", c->output);
-                return;
-            }
-        }
-
 
         char* filenm = cmd_tokenized[0];
         char** args = cmd_tokenized; 
@@ -96,6 +105,7 @@ execute_command (command_t c, bool time_travel)
                 fprintf(stderr, "Error in input file.\n");
                 c->status = -1;
             }
+            break;
         }
         else //parent
         {
@@ -103,10 +113,8 @@ execute_command (command_t c, bool time_travel)
             if (wait(&status) == -1) //child exited incorrectly
             {
                 c->status = -1;
-                return;
             }
-            else
-                return;
+            break;
         }
     }
     case AND_COMMAND:
@@ -210,4 +218,17 @@ execute_command (command_t c, bool time_travel)
     default:
         break;
     } //end switch
+
+    //need to reset the fds now
+    if (infd)
+    {
+        dup2(old_stdin, infd);
+    }
+    if (outfd)
+    {
+        dup2(old_stdout, fileno(stdout));
+        dup2(old_stderr, fileno(stderr));
+        close(old_stdout);
+        close(old_stderr);
+    }
 }
