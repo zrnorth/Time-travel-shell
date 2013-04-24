@@ -123,11 +123,51 @@ execute_command (command_t c, bool time_travel)
         
         break;
     }
-    case PIPE_COMMAND:
-        //execute left and feed into right
-        //treat each command as a subshell and run them seperately
-        //if no time travel, the right side waits for left to complete and grabs its output
+    case PIPE_COMMAND: //this can't be changed in time_travel, bc dependencies
+    {
+        int pipefd[2]; //pipe file descriptors
+        pid_t left_pid, right_pid; //leftside and rightside of the pipe_command
+
+        command_t leftside = c->u.command[0];
+        command_t rightside = c->u.command[1];
+
+        pipe(pipefd); //create a pipe
+
+        //leftside child, generating output to the pipe
+        if ((left_pid = fork()) == 0)
+        {   //we want to attach the leftside's stdout to the pipe
+            dup2(pipefd[1], STDOUT_FILENO);
+            close(pipefd[0]); //not using rightside
+
+            //execute left side
+            execute_command(leftside, time_travel);
+            //if we ever get here we want to set status to fail
+            c->status = -1;
+        }
+
+        //we don't wait for leftside pid
+
+        //rightside child, consuming input to the pipe
+        if ((right_pid = fork()) == 0)
+        {   //want to attach rightside stdin to the pipe
+            dup2(pipefd[0], STDIN_FILENO);
+            close(pipefd[1]); //not using leftside
+
+            //now execute the right side
+            execute_command(rightside, time_travel);
+            //if we ever get here, set status to failed
+            c->status = -1;
+        }
+        
+        else // parent
+        {
+            int status = 0;
+            if (wait(&status) == -1 || status != 0)
+                c->status = -1;
+        }
+
         break;
+    }
 
     //the parser handles subshells and sequence commands already
     default:
