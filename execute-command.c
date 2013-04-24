@@ -39,10 +39,6 @@ char** split_string (char* s)
         head[num_tokens] = NULL;
         p = strtok(NULL, " ");
     }
-    //debug
-    int i;
-    for (i = 0; i < num_tokens; i++)
-        printf("%s\n", head[i]); 
     
     return head;
 }
@@ -64,12 +60,53 @@ execute_command (command_t c, bool time_travel)
         
         char** cmd_tokenized = split_string(the_command);
 
+        //need to get input / output redirects, if there is some.
+        if (c->input)
+        {
+            FILE* in = fopen(c->input, "r");
+            if (in)
+                dup2(fileno(in), fileno(stdin));
+            else
+            {
+                fprintf(stderr, "%s: No such file or directory\n", c->input);
+                return;
+            }
+        }
+        if (c->output)
+        {
+            FILE* out = fopen(c->output, "w");
+            if (out)
+                dup2(fileno(out), fileno(stdout));
+            else
+            {
+                fprintf(stderr, "%s: Could not open this file\n", c->output);
+                return;
+            }
+        }
+
+
         char* filenm = cmd_tokenized[0];
         char** args = cmd_tokenized; 
-        if (execvp(filenm, args) == -1) //some sort of error
+
+        pid_t pid = fork(); //fork and execute this cmd
+        if (pid == 0)  //child
         {
-            fprintf(stderr, "Error in input file.\n");
-            c->status = -1;
+            if (execvp(filenm, args) == -1) //some sort of error
+            {
+                fprintf(stderr, "Error in input file.\n");
+                c->status = -1;
+            }
+        }
+        else //parent
+        {
+            int status = 0;
+            if (wait(&status) == -1) //child exited incorrectly
+            {
+                c->status = -1;
+                return;
+            }
+            else
+                return;
         }
     }
     case AND_COMMAND:
