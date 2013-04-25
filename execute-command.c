@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include "alloc.h"
 
 /* FIXME: You may need to add #include directives, macro definitions,
@@ -51,44 +52,45 @@ execute_command (command_t c, bool time_travel)
     time_travel = false;
 
     enum command_type type = c->type;
+    c->status = 0;
 
-    int old_stdin  = dup(fileno(stdin));
-    int old_stdout = dup(fileno(stdout));
-    int old_stderr = dup(fileno(stderr));
+    int old_stdin  = dup(STDIN_FILENO);
+    int old_stdout = dup(STDOUT_FILENO);
+    int old_stderr = dup(STDERR_FILENO);
 
     int infd = -1;
     int outfd = -1;
     if (c->input)
     {
-        infd = fileno(fopen(c->input, "r"));
-        if (infd)
+        infd = open(c->input, O_RDONLY);
+        if (infd == -1)
         {
-            dup2(infd, fileno(stdin));
+            error(1, 0, "%s: No such file or directory", c->input);
+            c->status = -1;
+            exit(1);
         }
-        else
-        {
-            fprintf(stderr, "%s: No such file or directory\n", c->input);
-            return;
-        }
+        dup2(infd, STDIN_FILENO);
+        close(infd);
     }
+
     if (c->output)
     {
-        outfd = fileno(fopen(c->output, "w"));
-        if (outfd)
+        outfd = open(c->output, O_RDWR | O_CREAT);
+        if (outfd == -1)
         {
-            dup2(outfd, fileno(stdout));
-            dup2(outfd, fileno(stderr));
+            error(1, 0, "File %s could not be created", c->output);
+            exit(1);
         }
-        else
-        {
-            fprintf(stderr, "%s: Could not open this file\n", c->output);
-            return;
-        }
-    }
+        //want to use the file for output
+        dup2(outfd, STDOUT_FILENO);
+        dup2(outfd, STDERR_FILENO);
+        close(outfd);
+    }    
     switch(type)
     {
     case SIMPLE_COMMAND:
     {
+         
         //execute the command; just use execvp and return what it returns.
         char* the_command = *c->u.word;
         
@@ -105,17 +107,12 @@ execute_command (command_t c, bool time_travel)
                 fprintf(stderr, "Error in input file.\n");
                 c->status = -1;
             }
-            break;
         }
         else //parent
         {
-            int status = 0;
-            if (wait(&status) == -1) //child exited incorrectly
-            {
-                c->status = -1;
-            }
-            break;
+            waitpid(pid, &(c->status), 0);
         }
+        break;
     }
     case AND_COMMAND:
     {
@@ -126,6 +123,7 @@ execute_command (command_t c, bool time_travel)
         if (pid == 0) //child
         {
             execute_command(leftside, time_travel);
+            exit(0);
         }
         else //parent
         {
@@ -154,6 +152,7 @@ execute_command (command_t c, bool time_travel)
         if (pid == 0) //child
         {
             execute_command(leftside, time_travel);
+            exit(0);
         }
         else //parent
         {
@@ -170,47 +169,57 @@ execute_command (command_t c, bool time_travel)
     }
     case PIPE_COMMAND: //this can't be changed in time_travel, bc dependencies
     {
-        int pipefd[2]; //pipe file descriptors
-        pid_t left_pid, right_pid; //leftside and rightside of the pipe_command
 
         command_t leftside = c->u.command[0];
         command_t rightside = c->u.command[1];
 
-        pipe(pipefd); //create a pipe
-
-        //leftside child, generating output to the pipe
-        if ((left_pid = fork()) == 0)
-        {   //we want to attach the leftside's stdout to the pipe
-            dup2(pipefd[1], STDOUT_FILENO);
-            close(pipefd[0]); //not using rightside
-
-            //execute left side
-            execute_command(leftside, time_travel);
-            //if we ever get here we want to set status to fail
-            c->status = -1;
-        }
-
-        //we don't wait for leftside pid
-
-        //rightside child, consuming input to the pipe
-        if ((right_pid = fork()) == 0)
-        {   //want to attach rightside stdin to the pipe
-            dup2(pipefd[0], STDIN_FILENO);
-            close(pipefd[1]); //not using leftside
-
-            //now execute the right side
-            execute_command(rightside, time_travel);
-            //if we ever get here, set status to failed
-            c->status = -1;
-        }
-        
-        else // parent
+        pid_t p = fork();
+        if (p == -1) 
         {
-            int status = 0;
-            if (wait(&status) == -1 || status != 0)
-                c->status = -1;
+            error(1, 0, "Fork failed in pipe execution.");
+            c->status = 1;
+            exit(1);
         }
+        else if (p == 0) //run everything in the child, and wait for it to finish
+        {
+            int pipefd[2]; //pipe file descriptors
+            if (pipe(pipefd)) //pipe error of some sort.
+            {
+                error(1, 0, "Pipe creation failure");
+                c->status = -1;
+                exit(1);
+            }
 
+            pid_t r = fork();
+            if (r == -1)
+            {
+                error(1, 0, "Fork failed in pipe execution.");
+                c->status = 1;
+                exit(1);
+            }
+            else if (!r) //leftside
+            {
+                close (pipefd[0]);
+                dup2(pipefd[1], 1);
+                close(pipefd[1]);
+                execute_command(leftside, time_travel);
+                exit(0);
+            }
+            else //rightside
+            {
+                int status;
+                wait(&status);
+                close(pipefd[1]);
+                dup2(pipefd[0], 0);
+                close(pipefd[0]);
+                execute_command(rightside, time_travel);
+            }
+        }
+        else
+        {
+            wait(&c->status);
+            exit(c->status);
+        }
         break;
     }
 
@@ -220,15 +229,16 @@ execute_command (command_t c, bool time_travel)
     } //end switch
 
     //need to reset the fds now
-    if (infd)
+    if (infd != -1)
     {
-        dup2(old_stdin, infd);
+        dup2(old_stdin, STDIN_FILENO);
+        close(old_stdin);
     }
-    if (outfd)
+    if (outfd != -1)
     {
-        dup2(old_stdout, fileno(stdout));
-        dup2(old_stderr, fileno(stderr));
+        dup2(old_stdout, STDOUT_FILENO);
+        dup2(old_stderr, STDERR_FILENO);
         close(old_stdout);
         close(old_stderr);
-    }
+    } 
 }

@@ -597,6 +597,11 @@ make_command_stream (int (*get_next_byte) (void *),
             }
             //need to create a new tree
             command_t cmd = init_compound_cmd(NULL, SUBSHELL_COMMAND);
+            if (top_cmd && 
+                ( top_cmd->type == AND_COMMAND || 
+                  top_cmd->type == OR_COMMAND  ||
+                  top_cmd->type == PIPE_COMMAND))
+                    top_cmd->u.command[1] = cmd; //point the rightside to this new cmd
             top_cmd = NULL; 
             prev_cmd = cmd;
             depth++;
