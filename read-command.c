@@ -512,6 +512,7 @@ make_command_stream (int (*get_next_byte) (void *),
             if (!prev_cmd) syntax_error(__LINE__);
             if (i == 0 || i == t_list->length - 1) //we ignore trailing semicolons
                 break;
+            
             TOKEN_TYPE prev_token_type = t_list->tok[i-1].type;
             TOKEN_TYPE next_token_type = t_list->tok[i+1].type;
 
@@ -521,8 +522,18 @@ make_command_stream (int (*get_next_byte) (void *),
                ( next_token_type == WORD ||
                  next_token_type == BEGIN_SUBSHELL ||
                  next_token_type == NEWLINE))
+                 
             {
-                //TODO: need a way "up" the tree
+                while (next_token_type == NEWLINE && i < t_list->length-1)
+                {
+                    i++;
+                    if (i == t_list->length-1) break;
+                    next_token_type = t_list->tok[i+1].type;
+                    if (next_token_type == NEWLINE) continue;
+                    if (next_token_type == WORD || next_token_type == BEGIN_SUBSHELL) break;
+                    else syntax_error(__LINE__);
+                }
+                if (i == t_list->length-1) break;
                 command_t cmd;
                 if (top_seq_cmd)
                     cmd = init_compound_cmd(top_seq_cmd, SEQUENCE_COMMAND);
