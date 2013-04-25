@@ -99,7 +99,7 @@ tokenize_string (char* input)
     
     int str_length = strlen(input);
     int i;
-    for (i = 0; i < str_length; i++)
+    for (i = 0; i < str_length-1; i++)
     {
         char c = input[i];
         switch(c)
@@ -306,8 +306,6 @@ create_command_string(int (*get_next_byte) (void *), void *gnba)
     for (b = 0; b < strlen(the_string); b++)
         printf("%c", *(the_string+b));
     */
-    //remove trailing "\n" or ';' or '\r's, just to make things simpler later
-
     return the_string;
 }
 
@@ -739,7 +737,7 @@ read_command_stream (command_stream_t s)
             return NULL;
         }
 
-        default: return NULL; //should never get here but ya never knokw.
+        default: return NULL; //should never get here but ya never know.
     }
     return 0; 
 }
