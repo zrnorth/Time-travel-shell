@@ -10,6 +10,17 @@ PIPE command uses the linux pipe() call so the commands can share data
 between them. 
 
 My test_1b.sh file just tries some basic shell commands and checks that each
-control construct is working correctly. Personally I think everything works, but
-there may be some underlying bugs.
+control construct is working correctly. I couldn't test the redirect functionality in the
+script, because I kept running into permission errors. Personally I think redirs work, 
+from personal testing, but there may be some underlying bugs.
+
+One problem I was having is an inability to run the "cd" command. I believe this is because
+we aren't able to modify the parent process, and the current directory is an
+attribute of the parent, but I could be wrong and my program is just buggy.
+
+Also, my subshell implementation is a bit buggy -- it tends to lose other cmds if subshells
+are not the first commands in the sequence. They work internally, but a large 
+sequence of commands can become truncated if the subshell is somewhere in the middle
+rather than the beginning. I'm working on fixing this but it proves a pretty enduring bug,
+unfortunately, and I'm not really sure how to solve it at the moment.
 
