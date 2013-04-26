@@ -394,6 +394,7 @@ make_command_stream (int (*get_next_byte) (void *),
     command_t top_cmd = NULL;  //keep track of the top of the command tree.
     command_t top_seq_cmd = NULL;
     command_t last_word_parsed = NULL;
+    command_t subshell_parents[10]; //allow getting "out" of subshells
 
     int i;
     for (i = 0; i < t_list->length; i++)
@@ -596,27 +597,31 @@ make_command_stream (int (*get_next_byte) (void *),
                         syntax_error(__LINE__);
             }
             //need to create a new tree
-            command_t cmd = init_compound_cmd(NULL, SUBSHELL_COMMAND);
-            if (top_cmd && 
-                ( top_cmd->type == AND_COMMAND || 
-                  top_cmd->type == OR_COMMAND  ||
-                  top_cmd->type == PIPE_COMMAND))
-                    top_cmd->u.command[1] = cmd; //point the rightside to this new cmd
-            top_cmd = NULL; 
-            prev_cmd = cmd;
             depth++;
+            if (depth > 10) syntax_error(__LINE__); //ridiculous amount of subshells
+            subshell_parents[depth] = top_cmd; //keep track so we can get "out"
+            prev_cmd = NULL;
+            top_cmd = NULL; 
             break;
         }
         case END_SUBSHELL:
         {
             //close off the subshell and insert it into the sequence
-            prev_cmd = top_cmd;
+            command_t parent = subshell_parents[depth];
+            depth--;
+            command_t cmd = init_compound_cmd(top_cmd, SUBSHELL_COMMAND);
             if (top_seq_cmd)
             {
-                top_seq_cmd->u.command[1] = top_cmd; //pt to the top of the subshell tree
-                top_cmd = NULL;
+                top_seq_cmd->u.command[1] = cmd; //pt to the top of the subshell tree
+                top_cmd = parent;
             }
-            depth--;
+            else if (parent) //top cmd is &&, ||, or |
+            {
+                parent->u.command[1] = cmd;
+                top_cmd = parent;
+            }
+            //else subshell was first command; do nothing
+            prev_cmd = cmd; 
             break;
         }
 

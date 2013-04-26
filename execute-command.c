@@ -60,32 +60,39 @@ execute_command (command_t c, bool time_travel)
 
     int infd = -1;
     int outfd = -1;
+
     if (c->input)
     {
-        infd = open(c->input, O_RDONLY);
-        if (infd == -1)
+        FILE* in = fopen(c->input, "r");
+        if (in)
+        {
+            infd = fileno(in);
+            dup2(infd, STDIN_FILENO);
+        }
+        else
         {
             error(1, 0, "%s: No such file or directory", c->input);
             c->status = -1;
             exit(1);
         }
-        dup2(infd, STDIN_FILENO);
-        close(infd);
     }
-
     if (c->output)
     {
-        outfd = open(c->output, O_RDWR | O_CREAT);
-        if (outfd == -1)
+        FILE* out = fopen(c->output, "w");
+        if (out)
         {
-            error(1, 0, "File %s could not be created", c->output);
+            outfd = fileno(out);
+            dup2(outfd, STDOUT_FILENO);
+            dup2(outfd, STDERR_FILENO);
+        }
+        else
+        {
+            error(1, 0, "%s: Could not open the file", c->output);
+            c->status = -1;
             exit(1);
         }
-        //want to use the file for output
-        dup2(outfd, STDOUT_FILENO);
-        dup2(outfd, STDERR_FILENO);
-        close(outfd);
-    }    
+    }
+
     switch(type)
     {
     case SIMPLE_COMMAND:
