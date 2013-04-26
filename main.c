@@ -1,9 +1,11 @@
 // UCLA CS 111 Lab 1 main program
-
+#include <stdlib.h>
 #include <errno.h>
 #include <error.h>
 #include <getopt.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #include "command.h"
 
@@ -53,19 +55,47 @@ main (int argc, char **argv)
 
   command_t last_command = NULL;
   command_t command;
-  while ((command = read_command_stream (command_stream)))
+  if (time_travel && !print_tree)
+  {
+    pid_t p = fork(); //parent will wait for entire loop to finish
+    if (!p) //child
     {
-      if (print_tree)
-	{
-	  printf ("# %d\n", command_number++);
-	  print_command (command);
-	}
-      else
-	{
-	  last_command = command;
-	  execute_command (command, time_travel);
-	}
+        while ((command = read_command_stream(command_stream))) //new proc for each command
+        {
+            pid_t n = fork();
+            if (!n)
+            {
+                last_command = command;
+                execute_command(command, time_travel);
+                exit(0);
+            }
+            else //parent
+            {
+                continue; //make the next proc
+            }
+        }
     }
-
+    else //parent waits for all children to finish
+    {
+        int status = 0;
+        wait(&status);
+    }
+  }
+  else
+  {
+    while ((command = read_command_stream (command_stream)))
+    {
+        if (print_tree)
+	    {
+	        printf ("# %d\n", command_number++);
+	        print_command (command);
+	    }
+        else 
+	    {
+	        last_command = command;
+	        execute_command (command, time_travel);
+	    }
+    }
+  }
   return print_tree || !last_command ? 0 : command_status (last_command);
 }
