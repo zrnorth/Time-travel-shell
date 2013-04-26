@@ -1,14 +1,17 @@
 // UCLA CS 111 Lab 1 command execution
-
+#define _GNU_SOURCE 1
 #include "command.h"
 #include "command-internals.h"
 
 #include <error.h>
+#include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include "alloc.h"
 
@@ -44,12 +47,27 @@ char** split_string (char* s)
     return head;
 }
 
+int 
+block_until_available (int fd, unsigned int timeout_sec)
+{
+    fd_set set;
+    struct timeval timeout;
+
+    //init the struct
+    FD_ZERO (&set);
+    FD_SET (fd, &set);
+
+    timeout.tv_sec = timeout_sec;
+    timeout.tv_usec = 0;
+
+    return TEMP_FAILURE_RETRY(select(FD_SETSIZE, &set, NULL, NULL, &timeout));
+}
+
 void
 execute_command (command_t c, bool time_travel)
 {
     //assuming that time_travel is false
     //TODO: this changes in part 1c
-    time_travel = false;
 
     enum command_type type = c->type;
     c->status = 0;
@@ -64,12 +82,27 @@ execute_command (command_t c, bool time_travel)
     if (c->input)
     {
         FILE* in = fopen(c->input, "r");
-        if (in)
+        
+        if (time_travel && in) //the input file might be in use. block until available
+        {
+            int file_status = block_until_available(fileno(in), 1); //1 sec timeout (TODO)
+            if (file_status != 1) // either timeout or some other error
+            {
+                error(1, 0, "%s: Error accessing file", c->input);
+                c->status = -1;
+                exit(1);
+            }
+            //else, gained access so continue
+            else
+                dup2(infd, STDIN_FILENO);
+        }
+        else if (in) //don't need to worry about blocking
         {
             infd = fileno(in);
             dup2(infd, STDIN_FILENO);
         }
-        else
+          
+        else //don't worry about blocking because not "timetraveling"      
         {
             error(1, 0, "%s: No such file or directory", c->input);
             c->status = -1;
@@ -80,6 +113,29 @@ execute_command (command_t c, bool time_travel)
     {
         FILE* out = fopen(c->output, "w");
         if (out)
+        {
+            outfd = fileno(out);
+            dup2(outfd, STDOUT_FILENO);
+            dup2(outfd, STDERR_FILENO);
+        }
+        if (time_travel && out) //the input file might be in use. block until available
+        {
+            int file_status = block_until_available(fileno(out), 1); //1 sec timeout (TODO)
+            if (file_status != 1) // either timeout or some other error
+            {
+                error(1, 0, "%s: Error accessing file", c->output);
+                c->status = -1;
+                exit(1);
+            }
+            //else, gained access so continue
+            else
+            {
+                outfd = fileno(out);
+                dup2(outfd, STDOUT_FILENO);
+                dup2(outfd, STDERR_FILENO);
+            }
+        }
+        else if (out) //not timetraveling so no need to worry about blocking
         {
             outfd = fileno(out);
             dup2(outfd, STDOUT_FILENO);
